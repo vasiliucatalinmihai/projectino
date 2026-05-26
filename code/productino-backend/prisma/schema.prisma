@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProjectStage {
+  BRIEFING
+  GAP_ANALYSIS
+  AWAITING_CLIENT
+  DEFINITION
+  PLANNING
+  DELIVERY
+}
+
+model User {
+  id           Int          @id @default(autoincrement())
+  email        String       @unique
+  name         String?
+  passwordHash String
+  permissions  Permission[] @relation("UserPermissions")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@map("users")
+}
+
+// A permission is a row, not a hard-coded enum, so the set can grow without a
+// schema change. The `key` matches the PermissionKey enum used in code/guards.
+model Permission {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  description String?
+  users       User[]   @relation("UserPermissions")
+  createdAt   DateTime @default(now())
+
+  @@map("permissions")
+}
+
+// Simple key/value settings store for app-wide configuration that can be
+// edited at runtime and read anywhere in the project.
+model Setting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// Example domain model. Demonstrates the repository + active-record pattern.
+// A Project is one client engagement moving through the discovery pipeline.
+model Project {
+  id          Int          @id @default(autoincrement())
+  name        String
+  clientName  String?
+  briefing    String?      @db.Text
+  stage       ProjectStage @default(BRIEFING)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@map("projects")
+}
+
+// --- Prompt manager ---------------------------------------------------------
+
+// One row per use case (keyed by a stable PromptKey). `activeVersionId` is the
+// pinned "live" version resolved at runtime.
+model Prompt {
+  id              Int                @id @default(autoincrement())
+  key             String             @unique
+  description     String?
+  activeVersionId Int?
+  versions        PromptVersion[]
+  experiments     PromptExperiment[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@map("prompts")
+}
+
+// Immutable snapshot of a prompt's text + model config, created whenever the
+// source file's checksum changes.
+model PromptVersion {
+  id        Int      @id @default(autoincrement())
+  promptId  Int
+  prompt    Prompt   @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  version   Int
+  content   String   @db.Text
+  config    Json     @default("{}")
+  checksum  String
+  source    String   @default("file") // file | ui
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@unique([promptId, version])
+  @@map("prompt_versions")
+}
+
+// Phase 3 (A/B). Present in the schema but not yet used by any code.
+model PromptExperiment {
+  id        Int      @id @default(autoincrement())
+  promptId  Int
+  prompt    Prompt   @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  status    String   @default("draft") // draft | running | done
+  variants  Json     @default("[]") // [{ versionId, weight }]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("prompt_experiments")
+}
+
+// Phase 2 (outcome log). Present in the schema but not yet used by any code.
+model PromptRun {
+  id           Int      @id @default(autoincrement())
+  promptKey    String
+  versionId    Int
+  experimentId Int?
+  subjectType  String?
+  subjectId    Int?
+  success      Boolean?
+  latencyMs    Int?
+  tokensIn     Int?
+  tokensOut    Int?
+  score        Float?
+  meta         Json?
+  createdAt    DateTime @default(now())
+
+  @@index([promptKey])
+  @@map("prompt_runs")
+}
