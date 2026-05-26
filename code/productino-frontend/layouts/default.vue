@@ -6,6 +6,11 @@ const { user, logout } = useAuth();
 // Load the current user once so every admin page has it available.
 const { data: me } = await useAsyncData('me', () => useApi<AuthUser>('/auth/me').catch(() => null));
 if (me.value) user.value = me.value;
+
+const canManagePrompts = computed(() => {
+  const p = user.value?.permissions ?? [];
+  return p.includes('ADMIN') || p.includes('MANAGE_PROMPTS');
+});
 </script>
 
 <template>
@@ -33,6 +38,14 @@ if (me.value) user.value = me.value;
           active-class="!text-brand bg-neutral-900"
         >
           Settings
+        </NuxtLink>
+        <NuxtLink
+          v-if="canManagePrompts"
+          to="/prompts"
+          class="rounded-md px-3 py-1.5 text-sm font-medium text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+          active-class="!text-brand bg-neutral-900"
+        >
+          Prompts
         </NuxtLink>
       </nav>
 

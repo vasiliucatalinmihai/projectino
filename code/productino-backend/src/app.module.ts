@@ -9,14 +9,24 @@ import { PrismaService } from './prisma.service';
 import { AuthController } from './http/controller/auth.controller';
 import { ProjectController } from './http/controller/project.controller';
 import { SettingController } from './http/controller/setting.controller';
+import { PromptController } from './http/controller/prompt.controller';
 
 // Services — add new ones here
-import { AuthService, ProjectService, SettingService } from './services';
+import {
+  AuthService,
+  ProjectService,
+  SettingService,
+  PromptManagerService,
+  PromptService,
+} from './services';
 
 // Repositories — add new ones here
 import {
   PermissionRepository,
   ProjectRepository,
+  PromptRepository,
+  PromptVersionRepository,
+  PromptRunRepository,
   SettingRepository,
   UserRepository,
 } from './repository';
@@ -35,18 +45,23 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
       signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
     }),
   ],
-  controllers: [AuthController, ProjectController, SettingController],
+  controllers: [AuthController, ProjectController, SettingController, PromptController],
   providers: [
     PrismaService,
     // repositories
     UserRepository,
     PermissionRepository,
     SettingRepository,
+    PromptRepository,
+    PromptVersionRepository,
+    PromptRunRepository,
     ProjectRepository,
     // services
     AuthService,
     ProjectService,
     SettingService,
+    PromptManagerService,
+    PromptService,
     // global authorization guard (reads @RequirePermissions metadata)
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],

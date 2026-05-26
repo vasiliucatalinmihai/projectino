@@ -10,6 +10,7 @@ const PERMISSIONS = [
   { key: 'VIEW_ONLY', description: 'Read-only access' },
   { key: 'RUN_LLM', description: 'Can run AI/LLM features' },
   { key: 'UPDATE_SETTINGS', description: 'Can change application settings' },
+  { key: 'MANAGE_PROMPTS', description: 'Can edit and promote prompt versions' },
 ];
 
 const SETTINGS = [

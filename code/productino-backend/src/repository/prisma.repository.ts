@@ -106,6 +106,14 @@ export abstract class PrismaRepository<T, CreateInput, UpdateInput> {
     return (await this.raw.count({ where })) > 0;
   }
 
+  async aggregate(args: Record<string, any>): Promise<any> {
+    return this.raw.aggregate(args);
+  }
+
+  async groupBy(args: Record<string, any>): Promise<any[]> {
+    return this.raw.groupBy(args);
+  }
+
   // ── Write ───────────────────────────────────────────────────────
 
   async create(data: CreateInput): Promise<T> {
