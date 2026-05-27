@@ -38,7 +38,11 @@ export class PermissionsGuard implements CanActivate {
     if (required.length === 0) return true; // authenticated-only route
 
     const keys = user.permissionKeys ?? [];
-    if (keys.includes(PermissionKey.ADMIN)) return true;
+    // Super admin passes everything.
+    if (keys.includes(PermissionKey.SUPER_ADMIN)) return true;
+    // A tenant admin bypasses every gate except SUPER_ADMIN-only routes.
+    const requiresSuper = required.includes(PermissionKey.SUPER_ADMIN);
+    if (!requiresSuper && keys.includes(PermissionKey.ADMIN)) return true;
 
     const hasAll = required.every((perm) => keys.includes(perm));
     if (!hasAll) {

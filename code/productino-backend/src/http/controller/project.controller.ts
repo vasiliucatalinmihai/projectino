@@ -21,7 +21,8 @@ import {
 } from '@nestjs/swagger';
 import { ProjectService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
-import { RequirePermissions } from '../decorators';
+import { User } from '../../entities';
+import { CurrentUser, RequirePermissions } from '../decorators';
 import { CreateProjectRequest, UpdateProjectRequest } from '../request/project';
 import { ProjectResponse } from '../response/project';
 
@@ -35,10 +36,10 @@ export class ProjectController {
 
   @Get()
   @RequirePermissions(PermissionKey.VIEW_ONLY)
-  @ApiOperation({ summary: 'List all projects', description: 'Requires VIEW_ONLY.' })
+  @ApiOperation({ summary: 'List projects in your account', description: 'Requires VIEW_ONLY.' })
   @ApiOkResponse({ type: [ProjectResponse] })
-  async findAll(): Promise<ProjectResponse[]> {
-    const projects = await this.projectService.findAll();
+  async findAll(@CurrentUser() user: User): Promise<ProjectResponse[]> {
+    const projects = await this.projectService.findAll(user);
     return projects.map(ProjectResponse.fromEntity);
   }
 
@@ -48,16 +49,22 @@ export class ProjectController {
   @ApiParam({ name: 'id', type: Number })
   @ApiOkResponse({ type: ProjectResponse })
   @ApiNotFoundResponse({ description: 'Project not found' })
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<ProjectResponse> {
-    return ProjectResponse.fromEntity(await this.projectService.findOne(id));
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ProjectResponse> {
+    return ProjectResponse.fromEntity(await this.projectService.findOne(id, user));
   }
 
   @Post()
   @RequirePermissions(PermissionKey.ADMIN)
   @ApiOperation({ summary: 'Create a project', description: 'Requires ADMIN.' })
   @ApiCreatedResponse({ type: ProjectResponse })
-  async create(@Body() body: CreateProjectRequest): Promise<ProjectResponse> {
-    return ProjectResponse.fromEntity(await this.projectService.create(body));
+  async create(
+    @Body() body: CreateProjectRequest,
+    @CurrentUser() user: User,
+  ): Promise<ProjectResponse> {
+    return ProjectResponse.fromEntity(await this.projectService.create(body, user));
   }
 
   @Patch(':id')
@@ -69,8 +76,9 @@ export class ProjectController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: UpdateProjectRequest,
+    @CurrentUser() user: User,
   ): Promise<ProjectResponse> {
-    return ProjectResponse.fromEntity(await this.projectService.update(id, body));
+    return ProjectResponse.fromEntity(await this.projectService.update(id, body, user));
   }
 
   @Delete(':id')
@@ -79,7 +87,10 @@ export class ProjectController {
   @ApiParam({ name: 'id', type: Number })
   @ApiOkResponse({ type: ProjectResponse })
   @ApiNotFoundResponse({ description: 'Project not found' })
-  async remove(@Param('id', ParseIntPipe) id: number): Promise<ProjectResponse> {
-    return ProjectResponse.fromEntity(await this.projectService.remove(id));
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ProjectResponse> {
+    return ProjectResponse.fromEntity(await this.projectService.remove(id, user));
   }
 }

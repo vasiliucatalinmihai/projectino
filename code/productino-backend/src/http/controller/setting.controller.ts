@@ -22,7 +22,8 @@ import {
 } from '@nestjs/swagger';
 import { SettingService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
-import { RequirePermissions } from '../decorators';
+import { User } from '../../entities';
+import { CurrentUser, RequirePermissions } from '../decorators';
 import { CreateSettingRequest, UpdateSettingRequest } from '../request/setting';
 import { SettingResponse } from '../response/setting';
 
@@ -38,8 +39,8 @@ export class SettingController {
   @RequirePermissions(PermissionKey.VIEW_ONLY)
   @ApiOperation({ summary: 'List all settings', description: 'Requires VIEW_ONLY.' })
   @ApiOkResponse({ type: [SettingResponse] })
-  async findAll(): Promise<SettingResponse[]> {
-    const settings = await this.settingService.findAll();
+  async findAll(@CurrentUser() user: User): Promise<SettingResponse[]> {
+    const settings = await this.settingService.findAll(user);
     return settings.map(SettingResponse.fromEntity);
   }
 
@@ -49,8 +50,11 @@ export class SettingController {
   @ApiParam({ name: 'id', type: Number })
   @ApiOkResponse({ type: SettingResponse })
   @ApiNotFoundResponse({ description: 'Setting not found' })
-  async findOne(@Param('id', ParseIntPipe) id: number): Promise<SettingResponse> {
-    return SettingResponse.fromEntity(await this.settingService.findOne(id));
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<SettingResponse> {
+    return SettingResponse.fromEntity(await this.settingService.findOne(id, user));
   }
 
   @Post()
@@ -58,8 +62,11 @@ export class SettingController {
   @ApiOperation({ summary: 'Create a setting', description: 'Requires UPDATE_SETTINGS.' })
   @ApiCreatedResponse({ type: SettingResponse })
   @ApiConflictResponse({ description: 'A setting with that key already exists' })
-  async create(@Body() body: CreateSettingRequest): Promise<SettingResponse> {
-    return SettingResponse.fromEntity(await this.settingService.create(body));
+  async create(
+    @Body() body: CreateSettingRequest,
+    @CurrentUser() user: User,
+  ): Promise<SettingResponse> {
+    return SettingResponse.fromEntity(await this.settingService.create(body, user));
   }
 
   @Patch(':id')
@@ -71,8 +78,9 @@ export class SettingController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: UpdateSettingRequest,
+    @CurrentUser() user: User,
   ): Promise<SettingResponse> {
-    return SettingResponse.fromEntity(await this.settingService.update(id, body));
+    return SettingResponse.fromEntity(await this.settingService.update(id, body, user));
   }
 
   @Delete(':id')
@@ -81,7 +89,10 @@ export class SettingController {
   @ApiParam({ name: 'id', type: Number })
   @ApiOkResponse({ type: SettingResponse })
   @ApiNotFoundResponse({ description: 'Setting not found' })
-  async remove(@Param('id', ParseIntPipe) id: number): Promise<SettingResponse> {
-    return SettingResponse.fromEntity(await this.settingService.remove(id));
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<SettingResponse> {
+    return SettingResponse.fromEntity(await this.settingService.remove(id, user));
   }
 }

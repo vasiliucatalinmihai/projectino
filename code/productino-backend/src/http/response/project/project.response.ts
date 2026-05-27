@@ -6,10 +6,27 @@ export class ProjectResponse {
   @ApiProperty({ example: 1 })
   id: number;
 
+  @ApiProperty({ example: 1 })
+  accountId: number;
+
+  @ApiPropertyOptional({
+    example: 'Acme Agency',
+    nullable: true,
+    description: 'Name of the owning account (convenience copy of account.name)',
+  })
+  accountName: string | null;
+
+  @ApiProperty({ example: 1 })
+  clientId: number;
+
   @ApiProperty({ example: 'Acme mobile app' })
   name: string;
 
-  @ApiPropertyOptional({ example: 'Acme Inc.', nullable: true })
+  @ApiPropertyOptional({
+    example: 'Acme Inc.',
+    nullable: true,
+    description: "Name of the related client (convenience copy of client.name)",
+  })
   clientName: string | null;
 
   @ApiProperty({ enum: ProjectStage, example: ProjectStage.BRIEFING })
@@ -29,8 +46,11 @@ export class ProjectResponse {
   static fromEntity(project: Project): ProjectResponse {
     return new ProjectResponse({
       id: project.id,
+      accountId: project.accountId,
+      accountName: project.account?.name ?? null,
+      clientId: project.clientId,
       name: project.name,
-      clientName: project.clientName,
+      clientName: project.client?.name ?? null,
       stage: project.stage,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,

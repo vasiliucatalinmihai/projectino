@@ -5,7 +5,8 @@
  *   @RequirePermissions(PermissionKey.RUN_LLM)
  */
 export enum PermissionKey {
-  ADMIN = 'ADMIN', // full access — bypasses every other permission check
+  SUPER_ADMIN = 'SUPER_ADMIN', // platform owner — crosses all accounts/tenants
+  ADMIN = 'ADMIN', // full access within the user's own account
   VIEW_ONLY = 'VIEW_ONLY', // read-only access
   RUN_LLM = 'RUN_LLM', // may invoke AI/LLM features
   UPDATE_SETTINGS = 'UPDATE_SETTINGS', // may change application settings
@@ -13,7 +14,8 @@ export enum PermissionKey {
 }
 
 export const ALL_PERMISSIONS: { key: PermissionKey; description: string }[] = [
-  { key: PermissionKey.ADMIN, description: 'Full access to everything' },
+  { key: PermissionKey.SUPER_ADMIN, description: 'Platform owner — access across all accounts' },
+  { key: PermissionKey.ADMIN, description: 'Full access within own account' },
   { key: PermissionKey.VIEW_ONLY, description: 'Read-only access' },
   { key: PermissionKey.RUN_LLM, description: 'Can run AI/LLM features' },
   { key: PermissionKey.UPDATE_SETTINGS, description: 'Can change application settings' },

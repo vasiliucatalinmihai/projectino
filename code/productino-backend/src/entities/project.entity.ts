@@ -1,10 +1,15 @@
 import { ProjectStage } from '@prisma/client';
+import { Account } from './account.entity';
 import { BaseEntity } from './base.entity';
+import { Client } from './client.entity';
 
 export class Project extends BaseEntity {
   id: number;
+  accountId: number;
+  account?: Account;
+  clientId: number;
+  client?: Client;
   name: string;
-  clientName: string | null;
   briefing: string | null;
   stage: ProjectStage;
   createdAt: Date;

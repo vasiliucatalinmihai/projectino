@@ -16,15 +16,78 @@ enum ProjectStage {
   DELIVERY
 }
 
+// A tenant: a company using the app. Users, projects and settings belong to one.
+// The system account (isSystem = true) hosts super admins who cross tenants.
+model Account {
+  id        Int       @id @default(autoincrement())
+  name      String
+  slug      String?   @unique
+  isSystem  Boolean   @default(false)
+  // When true, processing uses this account's own AI models/credentials;
+  // when false, the platform's default model is used. Super-admin controlled.
+  bringYourOwnAi Boolean @default(false)
+  users     User[]
+  clients   Client[]
+  projects  Project[]
+  settings  Setting[]
+  aiModels  AiModel[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("accounts")
+}
+
+// An LLM configuration an account can use when "bring your own AI" is enabled.
+// Exactly one per account is active at a time (the one used for processing).
+model AiModel {
+  id        Int      @id @default(autoincrement())
+  accountId Int
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  label     String?
+  provider  String   // e.g. anthropic, openai, google, azure-openai
+  model     String   // e.g. claude-opus-4-7, gpt-4o
+  apiKey    String?  @db.Text
+  baseUrl   String?  // optional custom endpoint / proxy
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([accountId])
+  @@map("ai_models")
+}
+
+// A client (the agency's customer) belonging to one account. Every project is
+// scoped to a client; the client carries the contact details for that engagement.
+model Client {
+  id        Int       @id @default(autoincrement())
+  accountId Int
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?   @db.Text
+  projects  Project[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([accountId, name])
+  @@index([accountId])
+  @@map("clients")
+}
+
 model User {
   id           Int          @id @default(autoincrement())
   email        String       @unique
   name         String?
   passwordHash String
+  accountId    Int
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
   permissions  Permission[] @relation("UserPermissions")
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
+  @@index([accountId])
   @@map("users")
 }
 
@@ -44,12 +107,15 @@ model Permission {
 // edited at runtime and read anywhere in the project.
 model Setting {
   id          Int      @id @default(autoincrement())
-  key         String   @unique
+  accountId   Int
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  key         String
   value       String
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@unique([accountId, key])
   @@map("settings")
 }
 
@@ -57,13 +123,18 @@ model Setting {
 // A Project is one client engagement moving through the discovery pipeline.
 model Project {
   id          Int          @id @default(autoincrement())
+  accountId   Int
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  clientId    Int
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   name        String
-  clientName  String?
   briefing    String?      @db.Text
   stage       ProjectStage @default(BRIEFING)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
+  @@index([accountId])
+  @@index([clientId])
   @@map("projects")
 }
 

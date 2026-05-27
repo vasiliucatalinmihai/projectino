@@ -29,6 +29,11 @@ export class AuthService {
 
   async login(body: LoginRequest): Promise<LoginResponse> {
     const user = await this.validateCredentials(body.email, body.password);
+    return this.issueToken(user);
+  }
+
+  /** Mint a JWT for a user (used by login and by super-admin impersonation). */
+  async issueToken(user: User): Promise<LoginResponse> {
     const payload: JwtPayload = { sub: user.id, email: user.email };
     const accessToken = await this.jwt.signAsync(payload);
     return new LoginResponse({ accessToken, user: UserResponse.fromEntity(user) });

@@ -7,6 +7,11 @@ import { PrismaService } from './prisma.service';
 
 // Controllers — add new ones here
 import { AuthController } from './http/controller/auth.controller';
+import { AccountController } from './http/controller/account.controller';
+import { CurrentAccountController } from './http/controller/current-account.controller';
+import { UserController } from './http/controller/user.controller';
+import { ClientController } from './http/controller/client.controller';
+import { AiModelController } from './http/controller/ai-model.controller';
 import { ProjectController } from './http/controller/project.controller';
 import { SettingController } from './http/controller/setting.controller';
 import { PromptController } from './http/controller/prompt.controller';
@@ -14,6 +19,10 @@ import { PromptController } from './http/controller/prompt.controller';
 // Services — add new ones here
 import {
   AuthService,
+  AccountService,
+  UserService,
+  ClientService,
+  AiModelService,
   ProjectService,
   SettingService,
   PromptManagerService,
@@ -22,6 +31,9 @@ import {
 
 // Repositories — add new ones here
 import {
+  AccountRepository,
+  ClientRepository,
+  AiModelRepository,
   PermissionRepository,
   ProjectRepository,
   PromptRepository,
@@ -45,12 +57,25 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
       signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
     }),
   ],
-  controllers: [AuthController, ProjectController, SettingController, PromptController],
+  controllers: [
+    AuthController,
+    AccountController,
+    CurrentAccountController,
+    UserController,
+    ClientController,
+    AiModelController,
+    ProjectController,
+    SettingController,
+    PromptController,
+  ],
   providers: [
     PrismaService,
     // repositories
+    AccountRepository,
     UserRepository,
     PermissionRepository,
+    ClientRepository,
+    AiModelRepository,
     SettingRepository,
     PromptRepository,
     PromptVersionRepository,
@@ -58,6 +83,10 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
     ProjectRepository,
     // services
     AuthService,
+    AccountService,
+    UserService,
+    ClientService,
+    AiModelService,
     ProjectService,
     SettingService,
     PromptManagerService,

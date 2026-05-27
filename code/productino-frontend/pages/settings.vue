@@ -80,8 +80,11 @@ async function remove(row: Setting) {
 
 <template>
   <div>
-    <CrudGrid
+    <DataGrid
       title="Settings"
+      creatable
+      editable
+      deletable
       :columns="columns"
       :rows="settings ?? []"
       @create="openCreate"

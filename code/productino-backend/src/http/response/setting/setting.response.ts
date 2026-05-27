@@ -5,6 +5,9 @@ export class SettingResponse {
   @ApiProperty({ example: 1 })
   id: number;
 
+  @ApiProperty({ example: 1 })
+  accountId: number;
+
   @ApiProperty({ example: 'default_currency' })
   key: string;
 
@@ -27,6 +30,7 @@ export class SettingResponse {
   static fromEntity(setting: Setting): SettingResponse {
     return new SettingResponse({
       id: setting.id,
+      accountId: setting.accountId,
       key: setting.key,
       value: setting.value,
       description: setting.description,

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class CreateProjectRequest {
   @ApiProperty({ example: 'Acme mobile app' })
@@ -8,11 +8,9 @@ export class CreateProjectRequest {
   @MaxLength(200)
   name: string;
 
-  @ApiPropertyOptional({ example: 'Acme Inc.' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  clientName?: string;
+  @ApiProperty({ example: 1, description: 'Id of the client this project belongs to' })
+  @IsInt()
+  clientId: number;
 
   @ApiPropertyOptional({ description: 'Raw initial briefing text' })
   @IsOptional()

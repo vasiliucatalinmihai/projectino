@@ -16,11 +16,11 @@ export class SettingRepository extends PrismaRepository<
     super(prisma, Setting);
   }
 
-  findByKey(key: string): Promise<Setting | null> {
-    return this.findUnique({ where: { key } });
+  findByAccountAndKey(accountId: number, key: string): Promise<Setting | null> {
+    return this.findFirst({ where: { accountId, key } });
   }
 
-  findAllOrdered(): Promise<Setting[]> {
-    return this.findMany({ orderBy: { key: 'asc' } });
+  findAllForAccount(accountId: number): Promise<Setting[]> {
+    return this.findMany({ where: { accountId }, orderBy: { key: 'asc' } });
   }
 }

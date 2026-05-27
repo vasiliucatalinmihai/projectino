@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma.service';
 import { User } from '../entities';
 import { PrismaRepository } from './prisma.repository';
 
+const withRelations = { permissions: true, account: true };
+
 @Injectable()
 export class UserRepository extends PrismaRepository<
   User,
@@ -17,10 +19,19 @@ export class UserRepository extends PrismaRepository<
   }
 
   findByEmailWithPermissions(email: string): Promise<User | null> {
-    return this.findUnique({ where: { email }, include: { permissions: true } });
+    return this.findUnique({ where: { email }, include: withRelations });
   }
 
   findByIdWithPermissions(id: number): Promise<User | null> {
-    return this.findUnique({ where: { id }, include: { permissions: true } });
+    return this.findUnique({ where: { id }, include: withRelations });
+  }
+
+  /** List users, optionally restricted to one account (null = all accounts). */
+  findForAccount(accountId: number | null): Promise<User[]> {
+    return this.findMany({
+      where: accountId === null ? {} : { accountId },
+      include: withRelations,
+      orderBy: { email: 'asc' },
+    });
   }
 }
