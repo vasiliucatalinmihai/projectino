@@ -83,14 +83,20 @@ async function save() {
     saving.value = false;
   }
 }
+const { confirm, alert } = useConfirm();
 async function remove() {
   if (!client.value) return;
-  if (!confirm(`Delete client "${client.value.name}"?`)) return;
+  if (!(await confirm({
+    title: `Delete client "${client.value.name}"?`,
+    message: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+    tone: 'danger',
+  }))) return;
   try {
     await useApi(`/clients/${clientId}`, { method: 'DELETE' });
     await navigateTo('/clients');
   } catch (e: any) {
-    alert(e?.data?.message ?? 'Delete failed');
+    await alert({ title: 'Delete failed', message: e?.data?.message, tone: 'danger' });
   }
 }
 

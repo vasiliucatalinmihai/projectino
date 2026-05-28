@@ -1,7 +1,28 @@
 <script setup lang="ts">
 import type { AuthUser } from '~/composables/useAuth';
 
-const { user, logout, isImpersonating, stopImpersonating } = useAuth();
+const { token, user, logout, isImpersonating, stopImpersonating } = useAuth();
+const { dialog, onConfirm, onClose, confirm, alert } = useConfirm();
+
+interface ResetMyPasswordResponse { activationToken: string }
+async function resetMyPassword(): Promise<void> {
+  if (!(await confirm({
+    title: 'Reset your password?',
+    message:
+      "You'll be signed out and taken to the activation page to choose a new password — then signed back in.",
+    confirmLabel: 'Reset password',
+    tone: 'warning',
+  }))) return;
+  try {
+    const res = await useApi<ResetMyPasswordResponse>('/auth/reset-my-password', { method: 'POST' });
+    // Clear the local session and jump straight to the activation page.
+    token.value = null;
+    user.value = null;
+    if (import.meta.client) window.location.assign(`/activate/${res.activationToken}`);
+  } catch (e: any) {
+    await alert({ title: 'Reset failed', message: e?.data?.message, tone: 'danger' });
+  }
+}
 
 // Load the current user once so every admin page has it available.
 const { data: me } = await useAsyncData('me', () => useApi<AuthUser>('/auth/me').catch(() => null));
@@ -115,6 +136,14 @@ const bottomNav = computed(() =>
             · {{ user.permissions.join(' · ') || 'no permissions' }}
           </div>
         </div>
+        <button
+          v-if="!isImpersonating"
+          class="btn-ghost"
+          title="Clear your password and set a new one via the activation page"
+          @click="resetMyPassword"
+        >
+          Reset password
+        </button>
         <button class="btn-ghost" @click="logout">Log out</button>
       </div>
     </header>
@@ -165,5 +194,18 @@ const bottomNav = computed(() =>
         </div>
       </main>
     </div>
+
+    <!-- Global confirm/alert dialog (replaces window.confirm + window.alert). -->
+    <ConfirmModal
+      v-if="dialog"
+      :title="dialog.title"
+      :message="dialog.message"
+      :confirm-label="dialog.confirmLabel"
+      :cancel-label="dialog.cancelLabel"
+      :tone="dialog.tone"
+      :single-action="dialog.singleAction"
+      @confirm="onConfirm"
+      @close="onClose"
+    />
   </div>
 </template>

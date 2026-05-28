@@ -101,23 +101,29 @@ async function save() {
     saving.value = false;
   }
 }
+const { confirm, alert } = useConfirm();
 async function onAction({ key, row }: { key: string; row: AiModel }) {
   if (key === 'activate') {
     try {
       await useApi(`/ai-models/${row.id}/activate`, { method: 'POST' });
       await Promise.all([refresh(), refreshEffective()]);
     } catch (e: any) {
-      alert(e?.data?.message ?? 'Could not activate');
+      await alert({ title: 'Could not activate', message: e?.data?.message, tone: 'danger' });
     }
   }
 }
 async function remove(m: AiModel) {
-  if (!confirm(`Delete AI model "${m.label ?? m.model}"?`)) return;
+  if (!(await confirm({
+    title: `Delete AI model "${m.label ?? m.model}"?`,
+    message: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+    tone: 'danger',
+  }))) return;
   try {
     await useApi(`/ai-models/${m.id}`, { method: 'DELETE' });
     await Promise.all([refresh(), refreshEffective()]);
   } catch (e: any) {
-    alert(e?.data?.message ?? 'Delete failed');
+    await alert({ title: 'Delete failed', message: e?.data?.message, tone: 'danger' });
   }
 }
 </script>

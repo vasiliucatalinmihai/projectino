@@ -57,11 +57,12 @@ async function main() {
   // Super admin lives in the system account.
   await prisma.user.upsert({
     where: { email: 'super@productino.local' },
-    update: {},
+    update: { active: true },
     create: {
       email: 'super@productino.local',
       name: 'Super Admin',
       passwordHash: await bcrypt.hash('super123', 10),
+      active: true,
       account: { connect: { id: system.id } },
       permissions: { connect: [{ key: 'SUPER_ADMIN' }] },
     },
@@ -71,6 +72,7 @@ async function main() {
   await prisma.user.upsert({
     where: { email: 'admin@productino.local' },
     update: {
+      active: true,
       account: { connect: { id: system.id } },
       permissions: { set: [{ key: 'SUPER_ADMIN' }] },
     },
@@ -78,17 +80,19 @@ async function main() {
       email: 'admin@productino.local',
       name: 'Platform Admin',
       passwordHash: await bcrypt.hash('admin123', 10),
+      active: true,
       account: { connect: { id: system.id } },
       permissions: { connect: [{ key: 'SUPER_ADMIN' }] },
     },
   });
   await prisma.user.upsert({
     where: { email: 'viewer@productino.local' },
-    update: {},
+    update: { active: true },
     create: {
       email: 'viewer@productino.local',
       name: 'Acme Viewer',
       passwordHash: await bcrypt.hash('viewer123', 10),
+      active: true,
       account: { connect: { id: acme.id } },
       permissions: { connect: [{ key: 'VIEW_ONLY' }] },
     },

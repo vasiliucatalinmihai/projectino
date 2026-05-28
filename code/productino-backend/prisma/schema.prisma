@@ -77,15 +77,22 @@ model Client {
 }
 
 model User {
-  id           Int          @id @default(autoincrement())
-  email        String       @unique
-  name         String?
-  passwordHash String
-  accountId    Int
-  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  permissions  Permission[] @relation("UserPermissions")
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id              Int          @id @default(autoincrement())
+  email           String       @unique
+  name            String?
+  // Null until the user activates their account by setting a password.
+  passwordHash    String?
+  // Inactive users cannot log in. New users start inactive and become active
+  // once they consume their activationToken.
+  active          Boolean      @default(false)
+  // Opaque one-shot token used to set/reset a password (no email flow).
+  // Cleared once consumed.
+  activationToken String?      @unique
+  accountId       Int
+  account         Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  permissions    Permission[] @relation("UserPermissions")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@index([accountId])
   @@map("users")

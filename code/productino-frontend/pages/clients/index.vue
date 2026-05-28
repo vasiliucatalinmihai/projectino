@@ -65,13 +65,19 @@ async function save() {
     saving.value = false;
   }
 }
+const { confirm, alert } = useConfirm();
 async function remove(row: Client) {
-  if (!confirm(`Delete client "${row.name}"?`)) return;
+  if (!(await confirm({
+    title: `Delete client "${row.name}"?`,
+    message: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+    tone: 'danger',
+  }))) return;
   try {
     await useApi(`/clients/${row.id}`, { method: 'DELETE' });
     await refresh();
   } catch (e: any) {
-    alert(e?.data?.message ?? 'Delete failed');
+    await alert({ title: 'Delete failed', message: e?.data?.message, tone: 'danger' });
   }
 }
 </script>

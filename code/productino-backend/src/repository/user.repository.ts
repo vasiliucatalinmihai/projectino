@@ -26,6 +26,10 @@ export class UserRepository extends PrismaRepository<
     return this.findUnique({ where: { id }, include: withRelations });
   }
 
+  findByActivationToken(token: string): Promise<User | null> {
+    return this.findUnique({ where: { activationToken: token }, include: withRelations });
+  }
+
   /** List users, optionally restricted to one account (null = all accounts). */
   findForAccount(accountId: number | null): Promise<User[]> {
     return this.findMany({

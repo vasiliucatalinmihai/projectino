@@ -66,14 +66,20 @@ async function save() {
   }
 }
 
+const { confirm, alert } = useConfirm();
 async function remove(row: Setting) {
-  if (!confirm(`Delete setting "${row.key}"?`)) return;
+  if (!(await confirm({
+    title: `Delete setting "${row.key}"?`,
+    message: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+    tone: 'danger',
+  }))) return;
   try {
     await useApi(`/settings/${row.id}`, { method: 'DELETE' });
     viewing.value = null;
     await refresh();
   } catch (e: any) {
-    alert(e?.data?.message ?? 'Delete failed');
+    await alert({ title: 'Delete failed', message: e?.data?.message, tone: 'danger' });
   }
 }
 </script>

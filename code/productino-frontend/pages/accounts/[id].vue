@@ -13,13 +13,17 @@ interface ManagedUser {
   email: string;
   name: string | null;
   accountId: number;
+  account?: { id: number; name: string; isSystem: boolean } | null;
   permissions: string[];
+  isSuperAdmin: boolean;
+  active: boolean;
+  activationToken: string | null;
   createdAt: string;
 }
 
 const route = useRoute();
 const accountId = Number(route.params.id);
-const { impersonate } = useAuth();
+const { user: currentUser, impersonate } = useAuth();
 
 const PERMS = ['SUPER_ADMIN', 'ADMIN', 'VIEW_ONLY', 'RUN_LLM', 'UPDATE_SETTINGS', 'MANAGE_PROMPTS'];
 
@@ -44,9 +48,14 @@ const userColumns = [
   { key: 'email', label: 'Email' },
   { key: 'name', label: 'Name' },
   { key: 'permsLabel', label: 'Permissions' },
+  { key: 'activeLabel', label: 'Active' },
 ];
 const userRows = computed(() =>
-  (users.value ?? []).map((u) => ({ ...u, permsLabel: u.permissions.join(' · ') || '—' })),
+  (users.value ?? []).map((u) => ({
+    ...u,
+    permsLabel: u.permissions.join(' · ') || '—',
+    activeLabel: u.active ? '● yes' : '○ no',
+  })),
 );
 
 // --- account edit ---
@@ -85,27 +94,40 @@ async function saveAccount() {
   }
 }
 
-// --- user create / edit ---
+// --- user view / create / edit / reset ---
+const viewingUser = ref<ManagedUser | null>(null);
+function openUserView(row: ManagedUser) {
+  viewingUser.value = users.value?.find((u) => u.id === row.id) ?? row;
+}
+
 const showUserForm = ref(false);
 const editingUser = ref<ManagedUser | null>(null);
 const savingUser = ref(false);
 const userError = ref('');
-const userForm = reactive({ email: '', name: '', password: '', permissions: [] as string[] });
+const userForm = reactive({
+  email: '',
+  name: '',
+  permissions: [] as string[],
+  active: true,
+});
 
 function openUserCreate() {
   editingUser.value = null;
-  Object.assign(userForm, { email: '', name: '', password: '', permissions: ['VIEW_ONLY'] });
+  viewingUser.value = null;
+  Object.assign(userForm, { email: '', name: '', permissions: ['VIEW_ONLY'], active: true });
   userError.value = '';
   showUserForm.value = true;
 }
-function openUserEdit(u: ManagedUser) {
-  editingUser.value = u;
+function openUserEdit() {
+  if (!viewingUser.value) return;
+  editingUser.value = viewingUser.value;
   Object.assign(userForm, {
-    email: u.email,
-    name: u.name ?? '',
-    password: '',
-    permissions: [...u.permissions],
+    email: viewingUser.value.email,
+    name: viewingUser.value.name ?? '',
+    permissions: [...viewingUser.value.permissions],
+    active: viewingUser.value.active,
   });
+  viewingUser.value = null;
   userError.value = '';
   showUserForm.value = true;
 }
@@ -121,39 +143,64 @@ async function saveUser() {
     if (editingUser.value) {
       await useApi(`/users/${editingUser.value.id}`, {
         method: 'PATCH',
-        body: {
-          name: userForm.name || null,
-          permissions: userForm.permissions,
-          ...(userForm.password ? { password: userForm.password } : {}),
-        },
+        body: { name: userForm.name || null, permissions: userForm.permissions, active: userForm.active },
       });
+      showUserForm.value = false;
+      await Promise.all([refreshUsers(), refreshAccount()]);
     } else {
-      await useApi('/users', {
+      const created = await useApi<ManagedUser>('/users', {
         method: 'POST',
         body: {
           email: userForm.email,
           name: userForm.name || undefined,
-          password: userForm.password,
           permissions: userForm.permissions,
           accountId,
         },
       });
+      showUserForm.value = false;
+      await Promise.all([refreshUsers(), refreshAccount()]);
+      viewingUser.value = created; // open the view so the admin can copy the activation link
     }
-    showUserForm.value = false;
-    await Promise.all([refreshUsers(), refreshAccount()]);
   } catch (e: any) {
     userError.value = e?.data?.message ?? 'Save failed';
   } finally {
     savingUser.value = false;
   }
 }
-async function removeUser(u: ManagedUser) {
-  if (!confirm(`Delete user "${u.email}"?`)) return;
+const { confirm, alert } = useConfirm();
+async function resetUser() {
+  if (!viewingUser.value) return;
+  if (!(await confirm({
+    title: `Reset password for ${viewingUser.value.email}?`,
+    message: "Their current password will be cleared and they'll need the new activation link to set a new one.",
+    confirmLabel: 'Reset',
+    tone: 'warning',
+  }))) return;
   try {
-    await useApi(`/users/${u.id}`, { method: 'DELETE' });
+    const updated = await useApi<ManagedUser>(`/users/${viewingUser.value.id}/reset-password`, {
+      method: 'POST',
+    });
+    await Promise.all([refreshUsers(), refreshAccount()]);
+    viewingUser.value = updated;
+  } catch (e: any) {
+    await alert({ title: 'Reset failed', message: e?.data?.message, tone: 'danger' });
+  }
+}
+async function removeUser() {
+  if (!viewingUser.value) return;
+  const target = viewingUser.value;
+  if (!(await confirm({
+    title: `Delete user ${target.email}?`,
+    message: 'This cannot be undone.',
+    confirmLabel: 'Delete',
+    tone: 'danger',
+  }))) return;
+  try {
+    await useApi(`/users/${target.id}`, { method: 'DELETE' });
+    viewingUser.value = null;
     await Promise.all([refreshUsers(), refreshAccount()]);
   } catch (e: any) {
-    alert(e?.data?.message ?? 'Delete failed');
+    await alert({ title: 'Delete failed', message: e?.data?.message, tone: 'danger' });
   }
 }
 
@@ -202,16 +249,23 @@ async function confirmImpersonate() {
       <DataGrid
         title="Users"
         creatable
-        editable
-        deletable
-        :clickable="false"
         :columns="userColumns"
         :rows="userRows"
         @create="openUserCreate"
-        @edit="openUserEdit"
-        @remove="removeUser"
+        @view="openUserView"
       />
     </template>
+
+    <UserViewModal
+      v-if="viewingUser"
+      :user="viewingUser"
+      :can-manage="true"
+      :is-self="viewingUser.id === currentUser?.id"
+      @close="viewingUser = null"
+      @edit="openUserEdit"
+      @remove="removeUser"
+      @reset-password="resetUser"
+    />
 
     <ImpersonateModal
       v-if="showImpersonate && account"
@@ -247,9 +301,10 @@ async function confirmImpersonate() {
           <input v-model="userForm.email" type="email" class="inp disabled:bg-neutral-800 disabled:text-neutral-500" :disabled="!!editingUser" required />
         </label>
         <label class="field">Name<input v-model="userForm.name" class="inp" /></label>
-        <label class="field">
-          {{ editingUser ? 'New password (optional)' : 'Password' }}
-          <input v-model="userForm.password" type="password" class="inp" :required="!editingUser" autocomplete="new-password" />
+        <label v-if="editingUser" class="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+          <input v-model="userForm.active" type="checkbox" class="accent-green-500" />
+          Active
+          <span class="text-xs text-neutral-500">(inactive users cannot log in)</span>
         </label>
         <div class="field">
           Permissions
@@ -265,6 +320,9 @@ async function confirmImpersonate() {
             </label>
           </div>
         </div>
+        <p v-if="!editingUser" class="m-0 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-neutral-400">
+          Created <strong class="text-amber-300">inactive</strong> with a one-shot activation link — share it so the user can set their password.
+        </p>
         <p v-if="userError" class="m-0 text-sm text-red-400">{{ userError }}</p>
         <div class="mt-1 flex justify-end gap-2">
           <button type="button" class="btn-ghost" @click="showUserForm = false">Cancel</button>

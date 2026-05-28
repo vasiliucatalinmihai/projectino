@@ -7,7 +7,9 @@ export class User extends BaseEntity {
   id: number;
   email: string;
   name: string | null;
-  passwordHash: string;
+  passwordHash: string | null;
+  active: boolean;
+  activationToken: string | null;
   accountId: number;
   account?: Account;
   permissions?: Permission[];
