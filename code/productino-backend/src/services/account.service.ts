@@ -2,10 +2,22 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { AccountRepository, UserRepository } from '../repository';
 import { Account } from '../entities';
 import { PermissionKey } from '../common/permission-key';
-import { AccountResponse } from '../http/response/account';
-import { LoginResponse } from '../http/response/auth';
-import { CreateAccountRequest, UpdateAccountRequest } from '../http/request/account';
-import { AuthService } from './auth.service';
+import { AuthService, IssuedToken } from './auth.service';
+
+// Service-level inputs/outputs (no HTTP DTOs).
+export interface CreateAccountInput {
+  name: string;
+  slug?: string | null;
+}
+export interface UpdateAccountInput {
+  name?: string;
+  slug?: string | null;
+  bringYourOwnAi?: boolean;
+}
+export interface AccountWithStats {
+  account: Account;
+  userCount: number;
+}
 
 /** Tenant (account) management — SUPER_ADMIN only (gated at the controller). */
 @Injectable()
@@ -16,19 +28,20 @@ export class AccountService {
     private readonly auth: AuthService,
   ) {}
 
-  async list(): Promise<AccountResponse[]> {
+  async list(): Promise<AccountWithStats[]> {
     const accounts = await this.accounts.findAllOrdered();
     return Promise.all(
-      accounts.map(async (a) =>
-        AccountResponse.fromEntity(a, await this.users.count({ where: { accountId: a.id } })),
-      ),
+      accounts.map(async (account) => ({
+        account,
+        userCount: await this.users.count({ where: { accountId: account.id } }),
+      })),
     );
   }
 
-  async getOne(id: number): Promise<AccountResponse> {
+  async getOne(id: number): Promise<AccountWithStats> {
     const account = await this.getOrThrow(id);
     const userCount = await this.users.count({ where: { accountId: id } });
-    return AccountResponse.fromEntity(account, userCount);
+    return { account, userCount };
   }
 
   private async getOrThrow(id: number): Promise<Account> {
@@ -37,25 +50,24 @@ export class AccountService {
     return account;
   }
 
-  async create(body: CreateAccountRequest): Promise<AccountResponse> {
-    const account = await this.accounts.create({ name: body.name, slug: body.slug ?? null } as any);
-    return AccountResponse.fromEntity(account, 0);
+  create(input: CreateAccountInput): Promise<Account> {
+    return this.accounts.create({ name: input.name, slug: input.slug ?? null } as any);
   }
 
-  async update(id: number, body: UpdateAccountRequest): Promise<AccountResponse> {
+  async update(id: number, input: UpdateAccountInput): Promise<AccountWithStats> {
     await this.getOrThrow(id);
-    const account = await this.accounts.update(id, body);
+    const account = await this.accounts.update(id, input);
     const userCount = await this.users.count({ where: { accountId: id } });
-    return AccountResponse.fromEntity(account, userCount);
+    return { account, userCount };
   }
 
-  async remove(id: number): Promise<AccountResponse> {
+  async remove(id: number): Promise<Account> {
     const account = await this.getOrThrow(id);
     if (account.isSystem) {
       throw new BadRequestException('The system account cannot be deleted');
     }
     await this.accounts.delete(id); // cascades to its users/projects/settings
-    return AccountResponse.fromEntity(account, 0);
+    return account;
   }
 
   /**
@@ -63,7 +75,7 @@ export class AccountService {
    * can "enter" a tenant. Prefers an ADMIN of that account, falling back to its
    * first user.
    */
-  async impersonate(id: number): Promise<LoginResponse> {
+  async impersonate(id: number): Promise<IssuedToken> {
     const account = await this.getOrThrow(id);
     const users = await this.users.findForAccount(id);
     const target =

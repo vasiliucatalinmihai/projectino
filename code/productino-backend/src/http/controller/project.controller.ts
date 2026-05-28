@@ -64,7 +64,12 @@ export class ProjectController {
     @Body() body: CreateProjectRequest,
     @CurrentUser() user: User,
   ): Promise<ProjectResponse> {
-    return ProjectResponse.fromEntity(await this.projectService.create(body, user));
+    return ProjectResponse.fromEntity(
+      await this.projectService.create(
+        { name: body.name, clientId: body.clientId, briefing: body.briefing },
+        user,
+      ),
+    );
   }
 
   @Patch(':id')
@@ -78,7 +83,18 @@ export class ProjectController {
     @Body() body: UpdateProjectRequest,
     @CurrentUser() user: User,
   ): Promise<ProjectResponse> {
-    return ProjectResponse.fromEntity(await this.projectService.update(id, body, user));
+    return ProjectResponse.fromEntity(
+      await this.projectService.update(
+        id,
+        {
+          name: body.name,
+          clientId: body.clientId,
+          briefing: body.briefing,
+          stage: body.stage,
+        },
+        user,
+      ),
+    );
   }
 
   @Delete(':id')

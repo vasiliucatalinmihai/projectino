@@ -45,11 +45,12 @@ export class UserController {
     description: 'Super admin only: scope to a specific account',
   })
   @ApiOkResponse({ type: [UserResponse] })
-  list(
+  async list(
     @CurrentUser() user: User,
     @Query('accountId') accountId?: string,
   ): Promise<UserResponse[]> {
-    return this.userService.list(user, accountId ? Number(accountId) : undefined);
+    const users = await this.userService.list(user, accountId ? Number(accountId) : undefined);
+    return users.map(UserResponse.fromEntity);
   }
 
   @Post()
@@ -57,27 +58,45 @@ export class UserController {
   @ApiOperation({ summary: 'Create a user in your account' })
   @ApiCreatedResponse({ type: UserResponse })
   @ApiConflictResponse({ description: 'Email already in use' })
-  create(@Body() body: CreateUserRequest, @CurrentUser() user: User): Promise<UserResponse> {
-    return this.userService.create(body, user);
+  async create(@Body() body: CreateUserRequest, @CurrentUser() user: User): Promise<UserResponse> {
+    const created = await this.userService.create(
+      {
+        email: body.email,
+        name: body.name,
+        password: body.password,
+        permissions: body.permissions,
+        accountId: body.accountId,
+      },
+      user,
+    );
+    return UserResponse.fromEntity(created);
   }
 
   @Patch(':id')
   @RequirePermissions(PermissionKey.ADMIN)
   @ApiOperation({ summary: "Update a user's name, password or permissions" })
   @ApiOkResponse({ type: UserResponse })
-  update(
+  async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: UpdateUserRequest,
     @CurrentUser() user: User,
   ): Promise<UserResponse> {
-    return this.userService.update(id, body, user);
+    const updated = await this.userService.update(
+      id,
+      { name: body.name, password: body.password, permissions: body.permissions },
+      user,
+    );
+    return UserResponse.fromEntity(updated);
   }
 
   @Delete(':id')
   @RequirePermissions(PermissionKey.ADMIN)
   @ApiOperation({ summary: 'Delete a user' })
   @ApiOkResponse({ type: UserResponse })
-  remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: User): Promise<UserResponse> {
-    return this.userService.remove(id, user);
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<UserResponse> {
+    return UserResponse.fromEntity(await this.userService.remove(id, user));
   }
 }

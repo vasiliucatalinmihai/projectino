@@ -50,8 +50,9 @@ export class AiModelController {
     description: "Account's active model when BYO is on, otherwise the platform default.",
   })
   @ApiOkResponse({ type: EffectiveModelResponse })
-  effective(@CurrentUser() user: User): Promise<EffectiveModelResponse> {
-    return this.aiModels.effectiveForAccount(user);
+  async effective(@CurrentUser() user: User): Promise<EffectiveModelResponse> {
+    const effective = await this.aiModels.effectiveForAccount(user);
+    return new EffectiveModelResponse(effective);
   }
 
   @Post()
@@ -62,7 +63,19 @@ export class AiModelController {
     @Body() body: CreateAiModelRequest,
     @CurrentUser() user: User,
   ): Promise<AiModelResponse> {
-    return AiModelResponse.fromEntity(await this.aiModels.create(body, user));
+    return AiModelResponse.fromEntity(
+      await this.aiModels.create(
+        {
+          label: body.label,
+          provider: body.provider,
+          model: body.model,
+          apiKey: body.apiKey,
+          baseUrl: body.baseUrl,
+          isActive: body.isActive,
+        },
+        user,
+      ),
+    );
   }
 
   @Patch(':id')
@@ -76,7 +89,20 @@ export class AiModelController {
     @Body() body: UpdateAiModelRequest,
     @CurrentUser() user: User,
   ): Promise<AiModelResponse> {
-    return AiModelResponse.fromEntity(await this.aiModels.update(id, body, user));
+    return AiModelResponse.fromEntity(
+      await this.aiModels.update(
+        id,
+        {
+          label: body.label,
+          provider: body.provider,
+          model: body.model,
+          apiKey: body.apiKey,
+          baseUrl: body.baseUrl,
+          isActive: body.isActive,
+        },
+        user,
+      ),
+    );
   }
 
   @Post(':id/activate')

@@ -1,7 +1,17 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { SettingRepository } from '../repository';
 import { Setting, User } from '../entities';
-import { CreateSettingRequest, UpdateSettingRequest } from '../http/request/setting';
+
+// Service-level inputs (no HTTP DTOs).
+export interface CreateSettingInput {
+  key: string;
+  value: string;
+  description?: string | null;
+}
+export interface UpdateSettingInput {
+  value?: string;
+  description?: string | null;
+}
 
 @Injectable()
 export class SettingService {
@@ -25,25 +35,26 @@ export class SettingService {
     return setting?.value ?? null;
   }
 
-  async create(body: CreateSettingRequest, user: User): Promise<Setting> {
-    if (await this.settings.findByAccountAndKey(user.accountId, body.key)) {
-      throw new ConflictException(`Setting "${body.key}" already exists for this account`);
+  async create(input: CreateSettingInput, user: User): Promise<Setting> {
+    if (await this.settings.findByAccountAndKey(user.accountId, input.key)) {
+      throw new ConflictException(`Setting "${input.key}" already exists for this account`);
     }
     return this.settings.create({
-      key: body.key,
-      value: body.value,
-      description: body.description ?? null,
+      key: input.key,
+      value: input.value,
+      description: input.description ?? null,
       account: { connect: { id: user.accountId } },
     } as any);
   }
 
-  async update(id: number, body: UpdateSettingRequest, user: User): Promise<Setting> {
+  async update(id: number, input: UpdateSettingInput, user: User): Promise<Setting> {
     await this.findOne(id, user); // enforces account ownership
-    return this.settings.update(id, body);
+    return this.settings.update(id, input as any);
   }
 
   async remove(id: number, user: User): Promise<Setting> {
-    await this.findOne(id, user);
-    return this.settings.delete(id);
+    const setting = await this.findOne(id, user);
+    await this.settings.delete(id);
+    return setting;
   }
 }

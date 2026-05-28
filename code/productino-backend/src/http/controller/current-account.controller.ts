@@ -31,8 +31,9 @@ export class CurrentAccountController {
   @RequirePermissions(PermissionKey.VIEW_ONLY)
   @ApiOperation({ summary: "Get the caller's own account" })
   @ApiOkResponse({ type: AccountResponse })
-  getCurrent(@CurrentUser() user: User): Promise<AccountResponse> {
-    return this.accountService.getOne(user.accountId);
+  async getCurrent(@CurrentUser() user: User): Promise<AccountResponse> {
+    const { account, userCount } = await this.accountService.getOne(user.accountId);
+    return AccountResponse.fromEntity(account, userCount);
   }
 
   @Patch()
@@ -42,11 +43,15 @@ export class CurrentAccountController {
     description: 'Account admins can edit name/slug; bringYourOwnAi is super-admin only.',
   })
   @ApiOkResponse({ type: AccountResponse })
-  updateCurrent(
+  async updateCurrent(
     @Body() body: UpdateAccountRequest,
     @CurrentUser() user: User,
   ): Promise<AccountResponse> {
     // Strip super-admin-only fields: account admins cannot change BYO.
-    return this.accountService.update(user.accountId, { name: body.name, slug: body.slug });
+    const { account, userCount } = await this.accountService.update(user.accountId, {
+      name: body.name,
+      slug: body.slug,
+    });
+    return AccountResponse.fromEntity(account, userCount);
   }
 }

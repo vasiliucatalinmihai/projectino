@@ -4,8 +4,16 @@ import * as bcrypt from 'bcrypt';
 import { JwtPayload } from '../common/jwt-payload';
 import { User } from '../entities';
 import { UserRepository } from '../repository';
-import { LoginRequest } from '../http/request/auth';
-import { LoginResponse, UserResponse } from '../http/response/auth';
+
+// Service-level inputs/outputs (no HTTP DTOs).
+export interface LoginInput {
+  email: string;
+  password: string;
+}
+export interface IssuedToken {
+  accessToken: string;
+  user: User;
+}
 
 @Injectable()
 export class AuthService {
@@ -27,15 +35,15 @@ export class AuthService {
     return user;
   }
 
-  async login(body: LoginRequest): Promise<LoginResponse> {
-    const user = await this.validateCredentials(body.email, body.password);
+  async login(input: LoginInput): Promise<IssuedToken> {
+    const user = await this.validateCredentials(input.email, input.password);
     return this.issueToken(user);
   }
 
   /** Mint a JWT for a user (used by login and by super-admin impersonation). */
-  async issueToken(user: User): Promise<LoginResponse> {
+  async issueToken(user: User): Promise<IssuedToken> {
     const payload: JwtPayload = { sub: user.id, email: user.email };
     const accessToken = await this.jwt.signAsync(payload);
-    return new LoginResponse({ accessToken, user: UserResponse.fromEntity(user) });
+    return { accessToken, user };
   }
 }

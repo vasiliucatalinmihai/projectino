@@ -38,8 +38,9 @@ export class ClientController {
   @RequirePermissions(PermissionKey.VIEW_ONLY)
   @ApiOperation({ summary: 'List clients in your account', description: 'Requires VIEW_ONLY.' })
   @ApiOkResponse({ type: [ClientResponse] })
-  findAll(@CurrentUser() user: User): Promise<ClientResponse[]> {
-    return this.clientService.findAll(user);
+  async findAll(@CurrentUser() user: User): Promise<ClientResponse[]> {
+    const stats = await this.clientService.findAll(user);
+    return stats.map((s) => ClientResponse.fromEntity(s.client, s.projectCount));
   }
 
   @Get(':id')
@@ -63,7 +64,18 @@ export class ClientController {
     @Body() body: CreateClientRequest,
     @CurrentUser() user: User,
   ): Promise<ClientResponse> {
-    return ClientResponse.fromEntity(await this.clientService.create(body, user));
+    return ClientResponse.fromEntity(
+      await this.clientService.create(
+        {
+          name: body.name,
+          email: body.email,
+          phone: body.phone,
+          address: body.address,
+          notes: body.notes,
+        },
+        user,
+      ),
+    );
   }
 
   @Patch(':id')
@@ -77,7 +89,19 @@ export class ClientController {
     @Body() body: UpdateClientRequest,
     @CurrentUser() user: User,
   ): Promise<ClientResponse> {
-    return ClientResponse.fromEntity(await this.clientService.update(id, body, user));
+    return ClientResponse.fromEntity(
+      await this.clientService.update(
+        id,
+        {
+          name: body.name,
+          email: body.email,
+          phone: body.phone,
+          address: body.address,
+          notes: body.notes,
+        },
+        user,
+      ),
+    );
   }
 
   @Delete(':id')

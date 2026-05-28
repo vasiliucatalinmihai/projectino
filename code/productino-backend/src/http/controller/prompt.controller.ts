@@ -11,7 +11,12 @@ import {
 import { PromptService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { RequirePermissions } from '../decorators';
-import { PromptDetailResponse, PromptSummaryResponse } from '../response/prompt';
+import {
+  PromptDetailResponse,
+  PromptRunResponse,
+  PromptSummaryResponse,
+  PromptVersionResponse,
+} from '../response/prompt';
 
 @ApiTags('Prompts')
 @ApiBearerAuth('bearer')
@@ -25,15 +30,24 @@ export class PromptController {
   @Get()
   @ApiOperation({ summary: 'List prompts with version + run counts' })
   @ApiOkResponse({ type: [PromptSummaryResponse] })
-  list(): Promise<PromptSummaryResponse[]> {
-    return this.promptService.list();
+  async list(): Promise<PromptSummaryResponse[]> {
+    const summaries = await this.promptService.list();
+    return summaries.map((s) => new PromptSummaryResponse(s));
   }
 
   @Get(':key')
   @ApiOperation({ summary: 'Prompt detail: versions, per-version run stats, recent runs' })
   @ApiParam({ name: 'key', example: 'gap-analysis' })
   @ApiOkResponse({ type: PromptDetailResponse })
-  detail(@Param('key') key: string): Promise<PromptDetailResponse> {
-    return this.promptService.detail(key);
+  async detail(@Param('key') key: string): Promise<PromptDetailResponse> {
+    const detail = await this.promptService.detail(key);
+    return new PromptDetailResponse({
+      id: detail.id,
+      key: detail.key,
+      description: detail.description,
+      activeVersion: detail.activeVersion,
+      versions: detail.versions.map((v) => new PromptVersionResponse(v)),
+      recentRuns: detail.recentRuns.map(PromptRunResponse.fromEntity),
+    });
   }
 }

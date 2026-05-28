@@ -66,7 +66,12 @@ export class SettingController {
     @Body() body: CreateSettingRequest,
     @CurrentUser() user: User,
   ): Promise<SettingResponse> {
-    return SettingResponse.fromEntity(await this.settingService.create(body, user));
+    return SettingResponse.fromEntity(
+      await this.settingService.create(
+        { key: body.key, value: body.value, description: body.description },
+        user,
+      ),
+    );
   }
 
   @Patch(':id')
@@ -80,7 +85,13 @@ export class SettingController {
     @Body() body: UpdateSettingRequest,
     @CurrentUser() user: User,
   ): Promise<SettingResponse> {
-    return SettingResponse.fromEntity(await this.settingService.update(id, body, user));
+    return SettingResponse.fromEntity(
+      await this.settingService.update(
+        id,
+        { value: body.value, description: body.description },
+        user,
+      ),
+    );
   }
 
   @Delete(':id')

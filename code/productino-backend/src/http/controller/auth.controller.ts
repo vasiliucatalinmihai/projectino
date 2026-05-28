@@ -21,8 +21,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Log in with email + password, returns a JWT' })
   @ApiOkResponse({ type: LoginResponse })
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })
-  login(@Body() body: LoginRequest): Promise<LoginResponse> {
-    return this.authService.login(body);
+  async login(@Body() body: LoginRequest): Promise<LoginResponse> {
+    const issued = await this.authService.login({ email: body.email, password: body.password });
+    return new LoginResponse({
+      accessToken: issued.accessToken,
+      user: UserResponse.fromEntity(issued.user),
+    });
   }
 
   @Get('me')

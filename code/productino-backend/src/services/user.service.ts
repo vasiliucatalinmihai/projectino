@@ -8,8 +8,20 @@ import * as bcrypt from 'bcrypt';
 import { PermissionKey } from '../common/permission-key';
 import { User } from '../entities';
 import { UserRepository } from '../repository';
-import { CreateUserRequest, UpdateUserRequest } from '../http/request/user';
-import { UserResponse } from '../http/response/auth';
+
+// Service-level inputs (no HTTP DTOs).
+export interface CreateUserInput {
+  email: string;
+  name?: string | null;
+  password: string;
+  permissions?: string[];
+  accountId?: number;
+}
+export interface UpdateUserInput {
+  name?: string | null;
+  password?: string;
+  permissions?: string[];
+}
 
 /**
  * Manage users within an account. Tenant admins (ADMIN) manage their own
@@ -19,55 +31,54 @@ import { UserResponse } from '../http/response/auth';
 export class UserService {
   constructor(private readonly users: UserRepository) {}
 
-  async list(actingUser: User, accountId?: number): Promise<UserResponse[]> {
+  list(actingUser: User, accountId?: number): Promise<User[]> {
     // Super admins may scope to any account (or all); everyone else is pinned
     // to their own account regardless of what they ask for.
     const scope = actingUser.isSuperAdmin ? accountId ?? null : actingUser.accountId;
-    const users = await this.users.findForAccount(scope);
-    return users.map(UserResponse.fromEntity);
+    return this.users.findForAccount(scope);
   }
 
-  async create(body: CreateUserRequest, actingUser: User): Promise<UserResponse> {
-    const accountId = this.resolveAccountId(body.accountId, actingUser);
-    this.assertAssignable(body.permissions, actingUser);
+  async create(input: CreateUserInput, actingUser: User): Promise<User> {
+    const accountId = this.resolveAccountId(input.accountId, actingUser);
+    this.assertAssignable(input.permissions, actingUser);
 
-    if (await this.users.findByEmailWithPermissions(body.email)) {
-      throw new ConflictException(`A user with email "${body.email}" already exists`);
+    if (await this.users.findByEmailWithPermissions(input.email)) {
+      throw new ConflictException(`A user with email "${input.email}" already exists`);
     }
 
     const created = await this.users.create({
-      email: body.email,
-      name: body.name ?? null,
-      passwordHash: await bcrypt.hash(body.password, 10),
+      email: input.email,
+      name: input.name ?? null,
+      passwordHash: await bcrypt.hash(input.password, 10),
       account: { connect: { id: accountId } },
-      permissions: { connect: (body.permissions ?? []).map((key) => ({ key })) },
+      permissions: { connect: (input.permissions ?? []).map((key) => ({ key })) },
     } as any);
 
-    return UserResponse.fromEntity(await this.users.findByIdWithPermissions(created.id));
+    return (await this.users.findByIdWithPermissions(created.id))!;
   }
 
-  async update(id: number, body: UpdateUserRequest, actingUser: User): Promise<UserResponse> {
+  async update(id: number, input: UpdateUserInput, actingUser: User): Promise<User> {
     const target = await this.getScoped(id, actingUser);
     this.assertCanManageTarget(target, actingUser);
-    this.assertAssignable(body.permissions, actingUser);
+    this.assertAssignable(input.permissions, actingUser);
 
     const data: Record<string, any> = {};
-    if (body.name !== undefined) data.name = body.name;
-    if (body.password) data.passwordHash = await bcrypt.hash(body.password, 10);
-    if (body.permissions) data.permissions = { set: body.permissions.map((key) => ({ key })) };
+    if (input.name !== undefined) data.name = input.name;
+    if (input.password) data.passwordHash = await bcrypt.hash(input.password, 10);
+    if (input.permissions) data.permissions = { set: input.permissions.map((key) => ({ key })) };
 
     await this.users.update(id, data as any);
-    return UserResponse.fromEntity(await this.users.findByIdWithPermissions(id));
+    return (await this.users.findByIdWithPermissions(id))!;
   }
 
-  async remove(id: number, actingUser: User): Promise<UserResponse> {
+  async remove(id: number, actingUser: User): Promise<User> {
     const target = await this.getScoped(id, actingUser);
     this.assertCanManageTarget(target, actingUser);
     if (target.id === actingUser.id) {
       throw new ForbiddenException('You cannot delete your own account');
     }
     await this.users.delete(id);
-    return UserResponse.fromEntity(target);
+    return target;
   }
 
   // ── helpers ───────────────────────────────────────────────────

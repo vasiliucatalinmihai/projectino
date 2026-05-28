@@ -1,7 +1,20 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ProjectStage } from '@prisma/client';
 import { ClientRepository, ProjectRepository } from '../repository';
 import { Client, Project, User } from '../entities';
-import { CreateProjectRequest, UpdateProjectRequest } from '../http/request/project';
+
+// Service-level inputs (no HTTP DTOs).
+export interface CreateProjectInput {
+  name: string;
+  clientId: number;
+  briefing?: string | null;
+}
+export interface UpdateProjectInput {
+  name?: string;
+  clientId?: number;
+  briefing?: string | null;
+  stage?: ProjectStage;
+}
 
 @Injectable()
 export class ProjectService {
@@ -43,24 +56,24 @@ export class ProjectService {
     return client;
   }
 
-  async create(body: CreateProjectRequest, user: User): Promise<Project> {
+  async create(input: CreateProjectInput, user: User): Promise<Project> {
     // A project inherits its client's account, keeping the two in sync.
-    const client = await this.resolveClient(body.clientId, user);
+    const client = await this.resolveClient(input.clientId, user);
     const project = await this.projects.create({
-      name: body.name,
-      briefing: body.briefing ?? null,
+      name: input.name,
+      briefing: input.briefing ?? null,
       account: { connect: { id: client.accountId } },
       client: { connect: { id: client.id } },
     } as any);
     return this.findOne(project.id, user);
   }
 
-  async update(id: number, body: UpdateProjectRequest, user: User): Promise<Project> {
+  async update(id: number, input: UpdateProjectInput, user: User): Promise<Project> {
     const project = await this.findOne(id, user); // enforces account ownership
-    const data: any = { ...body };
+    const data: any = { ...input };
 
-    if (body.clientId !== undefined && body.clientId !== project.clientId) {
-      const client = await this.resolveClient(body.clientId, user);
+    if (input.clientId !== undefined && input.clientId !== project.clientId) {
+      const client = await this.resolveClient(input.clientId, user);
       if (client.accountId !== project.accountId) {
         throw new BadRequestException('Cannot move a project to a client in another account');
       }

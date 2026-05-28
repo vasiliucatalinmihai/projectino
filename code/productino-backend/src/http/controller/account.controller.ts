@@ -22,7 +22,7 @@ import { PermissionKey } from '../../common/permission-key';
 import { RequirePermissions } from '../decorators';
 import { CreateAccountRequest, UpdateAccountRequest } from '../request/account';
 import { AccountResponse } from '../response/account';
-import { LoginResponse } from '../response/auth';
+import { LoginResponse, UserResponse } from '../response/auth';
 
 @ApiTags('Accounts')
 @ApiBearerAuth('bearer')
@@ -36,15 +36,17 @@ export class AccountController {
   @Get()
   @ApiOperation({ summary: 'List all accounts (tenants)' })
   @ApiOkResponse({ type: [AccountResponse] })
-  list(): Promise<AccountResponse[]> {
-    return this.accountService.list();
+  async list(): Promise<AccountResponse[]> {
+    const stats = await this.accountService.list();
+    return stats.map((s) => AccountResponse.fromEntity(s.account, s.userCount));
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get one account (tenant)' })
   @ApiOkResponse({ type: AccountResponse })
-  getOne(@Param('id', ParseIntPipe) id: number): Promise<AccountResponse> {
-    return this.accountService.getOne(id);
+  async getOne(@Param('id', ParseIntPipe) id: number): Promise<AccountResponse> {
+    const { account, userCount } = await this.accountService.getOne(id);
+    return AccountResponse.fromEntity(account, userCount);
   }
 
   @Post(':id/impersonate')
@@ -53,31 +55,42 @@ export class AccountController {
     description: 'Returns a session token as an ADMIN (or first user) of that account.',
   })
   @ApiOkResponse({ type: LoginResponse })
-  impersonate(@Param('id', ParseIntPipe) id: number): Promise<LoginResponse> {
-    return this.accountService.impersonate(id);
+  async impersonate(@Param('id', ParseIntPipe) id: number): Promise<LoginResponse> {
+    const issued = await this.accountService.impersonate(id);
+    return new LoginResponse({
+      accessToken: issued.accessToken,
+      user: UserResponse.fromEntity(issued.user),
+    });
   }
 
   @Post()
   @ApiOperation({ summary: 'Create an account' })
   @ApiCreatedResponse({ type: AccountResponse })
-  create(@Body() body: CreateAccountRequest): Promise<AccountResponse> {
-    return this.accountService.create(body);
+  async create(@Body() body: CreateAccountRequest): Promise<AccountResponse> {
+    const account = await this.accountService.create({ name: body.name, slug: body.slug });
+    return AccountResponse.fromEntity(account, 0);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update an account' })
   @ApiOkResponse({ type: AccountResponse })
-  update(
+  async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: UpdateAccountRequest,
   ): Promise<AccountResponse> {
-    return this.accountService.update(id, body);
+    const { account, userCount } = await this.accountService.update(id, {
+      name: body.name,
+      slug: body.slug,
+      bringYourOwnAi: body.bringYourOwnAi,
+    });
+    return AccountResponse.fromEntity(account, userCount);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete an account (and its users/projects/settings)' })
   @ApiOkResponse({ type: AccountResponse })
-  remove(@Param('id', ParseIntPipe) id: number): Promise<AccountResponse> {
-    return this.accountService.remove(id);
+  async remove(@Param('id', ParseIntPipe) id: number): Promise<AccountResponse> {
+    const account = await this.accountService.remove(id);
+    return AccountResponse.fromEntity(account, 0);
   }
 }

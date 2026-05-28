@@ -1,8 +1,21 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ClientRepository, ProjectRepository } from '../repository';
 import { Client, User } from '../entities';
-import { ClientResponse } from '../http/response/client';
-import { CreateClientRequest, UpdateClientRequest } from '../http/request/client';
+
+// Service-level inputs/outputs (no HTTP DTOs).
+export interface CreateClientInput {
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  notes?: string | null;
+}
+export type UpdateClientInput = Partial<CreateClientInput>;
+
+export interface ClientWithStats {
+  client: Client;
+  projectCount: number;
+}
 
 @Injectable()
 export class ClientService {
@@ -16,15 +29,16 @@ export class ClientService {
     return user.isSuperAdmin ? {} : { accountId: user.accountId };
   }
 
-  async findAll(user: User): Promise<ClientResponse[]> {
+  async findAll(user: User): Promise<ClientWithStats[]> {
     const clients = await this.clients.findMany({
       where: this.scope(user),
       orderBy: { name: 'asc' },
     });
     return Promise.all(
-      clients.map(async (c) =>
-        ClientResponse.fromEntity(c, await this.projects.count({ where: { clientId: c.id } })),
-      ),
+      clients.map(async (client) => ({
+        client,
+        projectCount: await this.projects.count({ where: { clientId: client.id } }),
+      })),
     );
   }
 
@@ -37,29 +51,29 @@ export class ClientService {
     return client;
   }
 
-  async create(body: CreateClientRequest, user: User): Promise<Client> {
-    if (await this.clients.findByAccountAndName(user.accountId, body.name)) {
-      throw new ConflictException(`A client named "${body.name}" already exists`);
+  async create(input: CreateClientInput, user: User): Promise<Client> {
+    if (await this.clients.findByAccountAndName(user.accountId, input.name)) {
+      throw new ConflictException(`A client named "${input.name}" already exists`);
     }
     return this.clients.create({
-      name: body.name,
-      email: body.email ?? null,
-      phone: body.phone ?? null,
-      address: body.address ?? null,
-      notes: body.notes ?? null,
+      name: input.name,
+      email: input.email ?? null,
+      phone: input.phone ?? null,
+      address: input.address ?? null,
+      notes: input.notes ?? null,
       account: { connect: { id: user.accountId } },
     } as any);
   }
 
-  async update(id: number, body: UpdateClientRequest, user: User): Promise<Client> {
+  async update(id: number, input: UpdateClientInput, user: User): Promise<Client> {
     const client = await this.findOne(id, user); // enforces account ownership
-    if (body.name && body.name !== client.name) {
-      const clash = await this.clients.findByAccountAndName(client.accountId, body.name);
+    if (input.name && input.name !== client.name) {
+      const clash = await this.clients.findByAccountAndName(client.accountId, input.name);
       if (clash && clash.id !== id) {
-        throw new ConflictException(`A client named "${body.name}" already exists`);
+        throw new ConflictException(`A client named "${input.name}" already exists`);
       }
     }
-    return this.clients.update(id, body);
+    return this.clients.update(id, input as any);
   }
 
   async remove(id: number, user: User): Promise<Client> {
@@ -70,6 +84,7 @@ export class ClientService {
         `Client has ${projectCount} project(s); reassign or delete them before removing the client`,
       );
     }
-    return this.clients.delete(id);
+    await this.clients.delete(id);
+    return client;
   }
 }

@@ -5,12 +5,36 @@ import {
   PromptVersionRepository,
   VersionStats,
 } from '../repository';
-import {
-  PromptDetailResponse,
-  PromptRunResponse,
-  PromptSummaryResponse,
-  PromptVersionResponse,
-} from '../http/response/prompt';
+import { PromptRun } from '../entities';
+
+// Service-level outputs (no HTTP DTOs).
+export interface PromptSummary {
+  id: number;
+  key: string;
+  description: string | null;
+  activeVersion: number | null;
+  versionCount: number;
+  runCount: number;
+}
+export interface PromptVersionSummary {
+  id: number;
+  version: number;
+  isActive: boolean;
+  source: string;
+  model: string | null;
+  config: Record<string, any>;
+  notes: string | null;
+  createdAt: Date;
+  stats: VersionStats;
+}
+export interface PromptDetail {
+  id: number;
+  key: string;
+  description: string | null;
+  activeVersion: number | null;
+  versions: PromptVersionSummary[];
+  recentRuns: PromptRun[];
+}
 
 const EMPTY_STATS: VersionStats = {
   runs: 0,
@@ -30,27 +54,27 @@ export class PromptService {
     private readonly runs: PromptRunRepository,
   ) {}
 
-  async list(): Promise<PromptSummaryResponse[]> {
+  async list(): Promise<PromptSummary[]> {
     const all = await this.prompts.findAll();
     const summaries = await Promise.all(
       all.map(async (p) => {
         const versions = await this.versions.findMany({ where: { promptId: p.id } });
         const active = versions.find((v) => v.id === p.activeVersionId);
         const runCount = await this.runs.count({ where: { promptKey: p.key } });
-        return new PromptSummaryResponse({
+        return {
           id: p.id,
           key: p.key,
           description: p.description,
           activeVersion: active?.version ?? null,
           versionCount: versions.length,
           runCount,
-        });
+        };
       }),
     );
     return summaries.sort((a, b) => a.key.localeCompare(b.key));
   }
 
-  async detail(key: string): Promise<PromptDetailResponse> {
+  async detail(key: string): Promise<PromptDetail> {
     const prompt = await this.prompts.findByKey(key);
     if (!prompt) throw new NotFoundException(`Prompt "${key}" not found`);
 
@@ -61,34 +85,31 @@ export class PromptService {
     const statsByVersion = await this.runs.statsByVersion(key);
     const active = versions.find((v) => v.id === prompt.activeVersionId);
 
-    const versionDtos = versions.map(
-      (v) =>
-        new PromptVersionResponse({
-          id: v.id,
-          version: v.version,
-          isActive: v.id === prompt.activeVersionId,
-          source: v.source,
-          model: (v.config as any)?.model ?? null,
-          config: v.config ?? {},
-          notes: v.notes,
-          createdAt: v.createdAt,
-          stats: statsByVersion.get(v.id) ?? EMPTY_STATS,
-        }),
-    );
+    const versionSummaries: PromptVersionSummary[] = versions.map((v) => ({
+      id: v.id,
+      version: v.version,
+      isActive: v.id === prompt.activeVersionId,
+      source: v.source,
+      model: (v.config as any)?.model ?? null,
+      config: (v.config as Record<string, any>) ?? {},
+      notes: v.notes,
+      createdAt: v.createdAt,
+      stats: statsByVersion.get(v.id) ?? EMPTY_STATS,
+    }));
 
-    const recent = await this.runs.findMany({
+    const recentRuns = await this.runs.findMany({
       where: { promptKey: key },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
 
-    return new PromptDetailResponse({
+    return {
       id: prompt.id,
       key: prompt.key,
       description: prompt.description,
       activeVersion: active?.version ?? null,
-      versions: versionDtos,
-      recentRuns: recent.map(PromptRunResponse.fromEntity),
-    });
+      versions: versionSummaries,
+      recentRuns,
+    };
   }
 }
