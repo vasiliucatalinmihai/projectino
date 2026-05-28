@@ -1,0 +1,3 @@
+#!/bin/bash
+
+DOCKER_COMPOSE_FILE="-f docker-compose.prod.yml"

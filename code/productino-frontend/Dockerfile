@@ -10,6 +10,12 @@ RUN yarn install
 
 COPY . .
 
+# Pick the right .env for the build target (matches mind-guard's pattern)
+RUN if [ "$NODE_ENV" = "production" ] && [ -f .env.prod ]; then cp .env.prod .env; \
+    elif [ "$NODE_ENV" = "staging" ] && [ -f .env.staging ]; then cp .env.staging .env; \
+    elif [ -f .env.example ] && [ ! -f .env ]; then cp .env.example .env; \
+    fi
+
 ENV HOST=0.0.0.0
 ENV PORT=3000
 ENV NITRO_HOST=0.0.0.0

@@ -47,8 +47,13 @@ cd "${PROJECTPATH}"
 
 SUPPORTED_CONTAINERS=(nginx backend frontend postgres)
 DOCKER_COMPOSE_FILE=""
+if [ -f "./pd.env" ]; then
+  source "./pd.env"
+fi
 
 source "./pd_docker_handler.sh"
+
+echo -e "-> ${BIWhi}${On_Gre}Docker compose file: ${DOCKER_COMPOSE_FILE:-docker-compose.yml}      ${RCol}"
 
 case "$action" in
     build)   DOCKER_HANDLER_build   ${parameters}; exit $? ;;
