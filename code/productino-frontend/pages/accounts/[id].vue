@@ -254,6 +254,12 @@ async function confirmImpersonate() {
         @create="openUserCreate"
         @view="openUserView"
       />
+
+      <div class="mt-8">
+        <div class="kicker">// ai models</div>
+        <h2 class="m-0 mb-3 text-xl font-bold tracking-tight text-white">AI Models</h2>
+        <AiModelsManager :account-id="accountId" />
+      </div>
     </template>
 
     <UserViewModal

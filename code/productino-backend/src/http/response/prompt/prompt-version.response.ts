@@ -14,7 +14,6 @@ export class PromptVersionResponse {
   @ApiProperty({ example: 1 }) version: number;
   @ApiProperty({ example: true }) isActive: boolean;
   @ApiProperty({ example: 'file' }) source: string;
-  @ApiPropertyOptional({ nullable: true }) model: string | null;
   @ApiProperty({ type: Object }) config: Record<string, any>;
   @ApiPropertyOptional({ nullable: true }) notes: string | null;
   @ApiProperty() createdAt: Date;

@@ -14,8 +14,11 @@ interface ClientOption {
 
 const { user } = useAuth();
 const isSuperAdmin = computed(() => !!user.value?.isSuperAdmin);
-// Account admins can create projects; platform super admins only oversee.
-const canCreate = computed(() => (user.value?.permissions ?? []).includes('ADMIN'));
+// Everyone manages their own account's projects; super admins use impersonation
+// for other accounts, so a super admin creates within their own account here.
+const canCreate = computed(
+  () => isSuperAdmin.value || (user.value?.permissions ?? []).includes('ADMIN'),
+);
 
 const { data: projects, refresh } = await useAsyncData<Project[]>('projects', () =>
   useApi<Project[]>('/projects').catch(() => []),

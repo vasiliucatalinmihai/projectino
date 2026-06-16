@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateAiModelRequest {
   @ApiPropertyOptional({ example: 'Primary Claude', description: 'Friendly label' })
@@ -32,8 +40,26 @@ export class CreateAiModelRequest {
   @MaxLength(300)
   baseUrl?: string;
 
+  @ApiPropertyOptional({
+    description: 'Provider-specific options passed through on every call',
+    example: { temperature: 0.2 },
+    type: 'object',
+    additionalProperties: true,
+  })
+  @IsOptional()
+  @IsObject()
+  options?: Record<string, any>;
+
   @ApiPropertyOptional({ example: true, description: 'Make this the active model' })
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Super admin only: account to create the model in (defaults to your own)',
+  })
+  @IsOptional()
+  @IsInt()
+  accountId?: number;
 }

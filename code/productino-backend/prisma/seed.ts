@@ -1,4 +1,4 @@
-import { PrismaClient, ProjectStage } from '@prisma/client';
+import { PrismaClient, ProjectStage, SourceKind } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -107,12 +107,47 @@ async function main() {
     });
   }
 
+  // Platform-wide AI model catalog (provider → selectable models) on the system
+  // account. Super admins edit it via Settings to add/refresh models without a
+  // deploy. Keep in sync with src/common/ai-catalog.ts.
+  const MODEL_CATALOG = {
+    anthropic: ['claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+    openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini'],
+    deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+    qwen: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen2.5-72b-instruct'],
+  };
+  await prisma.setting.upsert({
+    where: { accountId_key: { accountId: system.id, key: 'AI_MODEL_CATALOG' } },
+    update: {}, // don't clobber runtime edits on re-seed
+    create: {
+      key: 'AI_MODEL_CATALOG',
+      value: JSON.stringify(MODEL_CATALOG, null, 2),
+      description: 'AI model catalog (provider → selectable models) for the admin dropdowns',
+      account: { connect: { id: system.id } },
+    },
+  });
+
   // Clients for Acme (idempotent on accountId+name).
   for (const c of CLIENTS) {
     await prisma.client.upsert({
       where: { accountId_name: { accountId: acme.id, name: c.name } },
       update: { email: c.email, phone: c.phone, address: c.address },
       create: { ...c, account: { connect: { id: acme.id } } },
+    });
+  }
+
+  // The platform default model, on the system account. Accounts that are NOT
+  // "bring your own AI" run on this one. Same shape as any tenant model.
+  if ((await prisma.aiModel.count({ where: { accountId: system.id } })) === 0) {
+    await prisma.aiModel.create({
+      data: {
+        accountId: system.id,
+        label: 'Platform default',
+        provider: 'anthropic',
+        model: 'claude-opus-4-8',
+        apiKey: 'sk-ant-demo-PLACEHOLDER-0000',
+        isActive: true,
+      },
     });
   }
 
@@ -131,18 +166,30 @@ async function main() {
   }
 
   // Dummy projects for Acme — only when empty, so re-seeding won't duplicate.
+  // Each project's briefing becomes its first Belief Graph source (round 1).
   if ((await prisma.project.count({ where: { accountId: acme.id } })) === 0) {
     const clients = await prisma.client.findMany({ where: { accountId: acme.id } });
     const clientIdByName = new Map(clients.map((c) => [c.name, c.id]));
-    await prisma.project.createMany({
-      data: PROJECTS.map((p) => ({
-        name: p.name,
-        briefing: p.briefing,
-        stage: p.stage,
-        accountId: acme.id,
-        clientId: clientIdByName.get(p.client)!,
-      })),
-    });
+    for (const p of PROJECTS) {
+      const project = await prisma.project.create({
+        data: {
+          name: p.name,
+          stage: p.stage,
+          accountId: acme.id,
+          clientId: clientIdByName.get(p.client)!,
+        },
+      });
+      if (p.briefing) {
+        await prisma.source.create({
+          data: {
+            projectId: project.id,
+            kind: SourceKind.BRIEFING,
+            content: p.briefing,
+            round: 1,
+          },
+        });
+      }
+    }
   }
 
   // eslint-disable-next-line no-console

@@ -88,6 +88,8 @@ export class PromptManagerService implements OnModuleInit {
       latencyMs: outcome.latencyMs ?? null,
       tokensIn: outcome.tokensIn ?? null,
       tokensOut: outcome.tokensOut ?? null,
+      provider: outcome.provider ?? null,
+      model: outcome.model ?? null,
       score: outcome.score ?? null,
       subjectType: ctx.subjectType ?? null,
       subjectId: ctx.subjectId ?? null,

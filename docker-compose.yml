@@ -20,7 +20,7 @@ services:
       args:
         NODE_ENV: development
     container_name: productino-backend
-    command: sh -c "yarn install && yarn prisma:generate && yarn prisma db push && yarn seed && yarn start:dev"
+    command: sh -c "yarn install && yarn prisma:generate && yarn prisma db push --accept-data-loss && yarn seed && yarn start:dev"
     ports:
       - "3001:8080"
       - "9230:9229"

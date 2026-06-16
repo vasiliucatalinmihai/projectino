@@ -4,7 +4,11 @@
  * Prefer these over class names so refactors don't silently break lookups.
  */
 export enum PromptKey {
-  GAP_ANALYSIS = 'gap-analysis',
+  // Belief Graph pipeline keys are added per phase (Phase 2+):
+  //   EXTRACT_BELIEFS = 'extract-beliefs',
+  //   SCORE_COVERAGE  = 'score-coverage',
+  //   MAP_ANSWERS     = 'map-answers',
+  //   SYNTHESIZE_PRD  = 'synthesize-prd',
 }
 
 /** Model/runtime config stored alongside each prompt version (from frontmatter). */
@@ -30,6 +34,9 @@ export interface PromptRunOutcome {
   latencyMs?: number;
   tokensIn?: number;
   tokensOut?: number;
+  // The provider/model that served the run (from the LLM result).
+  provider?: string;
+  model?: string;
   score?: number;
   meta?: Record<string, any>;
 }

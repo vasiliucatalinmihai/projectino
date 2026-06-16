@@ -43,6 +43,9 @@ function toggleNav() {
 
 // Outline icon paths (Heroicons, 24×24, currentColor stroke).
 const ICONS: Record<string, string[]> = {
+  dashboard: [
+    'M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6',
+  ],
   accounts: [
     'M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21',
   ],
@@ -83,11 +86,17 @@ function toItems(keys: string[]) {
 
 // Two groups: primary nav up top, settings-like items pinned to the bottom.
 const topNav = computed(() =>
-  toItems(isSuperAdmin.value ? ['accounts', 'clients', 'projects'] : ['clients', 'projects']),
+  toItems(
+    isSuperAdmin.value
+      ? ['dashboard', 'accounts', 'clients', 'projects']
+      : ['clients', 'projects'],
+  ),
 );
 const bottomNav = computed(() =>
   toItems(
-    isSuperAdmin.value ? ['prompts', 'settings', 'account'] : ['users', 'ai-models', 'account'],
+    isSuperAdmin.value
+      ? ['ai-models', 'prompts', 'settings', 'account']
+      : ['users', 'ai-models', 'account'],
   ),
 );
 </script>

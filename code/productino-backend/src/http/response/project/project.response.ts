@@ -29,6 +29,9 @@ export class ProjectResponse {
   })
   clientName: string | null;
 
+  @ApiPropertyOptional({ nullable: true, description: 'Raw initial briefing text' })
+  briefing: string | null;
+
   @ApiProperty({ enum: ProjectStage, example: ProjectStage.BRIEFING })
   stage: ProjectStage;
 
@@ -51,6 +54,7 @@ export class ProjectResponse {
       clientId: project.clientId,
       name: project.name,
       clientName: project.client?.name ?? null,
+      briefing: project.briefing ?? null,
       stage: project.stage,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,

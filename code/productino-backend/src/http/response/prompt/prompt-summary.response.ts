@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class PromptSummaryResponse {
   @ApiProperty({ example: 1 }) id: number;
-  @ApiProperty({ example: 'gap-analysis' }) key: string;
+  @ApiProperty({ example: 'extract-beliefs' }) key: string;
   @ApiPropertyOptional({ nullable: true }) description: string | null;
   @ApiPropertyOptional({ nullable: true, description: 'Active version number' })
   activeVersion: number | null;

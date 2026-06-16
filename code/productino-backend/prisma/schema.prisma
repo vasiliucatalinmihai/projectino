@@ -16,6 +16,60 @@ enum ProjectStage {
   DELIVERY
 }
 
+// --- Belief Graph enums -----------------------------------------------------
+
+// Where a piece of raw input came from. The first briefing is BRIEFING; later
+// rounds add transcripts / emails / pasted client ANSWERS.
+enum SourceKind {
+  BRIEFING
+  TRANSCRIPT
+  EMAIL
+  ANSWERS
+}
+
+// A belief node's role in the Understanding layer. REQUIREMENT covers the
+// `kind` sub-types (feature/goal/rule/nfr/...); RISK/DECISION arrive in Phase 6.
+enum BeliefNodeType {
+  REQUIREMENT
+  ASSUMPTION
+  RISK
+  DECISION
+}
+
+// How sure we are of a belief and where it stands. The core epistemic axis: a
+// transcript's "we'd probably want…" is INFERRED, not silently CONFIRMED.
+enum BeliefStatus {
+  STATED
+  INFERRED
+  ASSUMED
+  CONFIRMED
+  REJECTED
+  CONTRADICTED
+}
+
+// Coverage of a rubric category, derived from its nodes' confidence.
+enum CoverageStatus {
+  UNDERDEFINED
+  THIN
+  ADEQUATE
+  SOLID
+}
+
+enum QuestionImpact {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// A question's lifecycle: proposed (OPEN) → curated in/out (INCLUDED/EXCLUDED)
+// → ANSWERED once the client replies.
+enum QuestionStatus {
+  OPEN
+  INCLUDED
+  EXCLUDED
+  ANSWERED
+}
+
 // A tenant: a company using the app. Users, projects and settings belong to one.
 // The system account (isSystem = true) hosts super admins who cross tenants.
 model Account {
@@ -48,6 +102,10 @@ model AiModel {
   model     String   // e.g. claude-opus-4-7, gpt-4o
   apiKey    String?  @db.Text
   baseUrl   String?  // optional custom endpoint / proxy
+  // Provider-specific knobs passed through on every call (e.g. temperature,
+  // Anthropic output_config/thinking, OpenAI response_format). Same shape for
+  // tenant models and the system default.
+  options   Json     @default("{}")
   isActive  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -134,15 +192,122 @@ model Project {
   account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
   clientId    Int
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  name        String
-  briefing    String?      @db.Text
-  stage       ProjectStage @default(BRIEFING)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  name         String
+  stage        ProjectStage  @default(BRIEFING)
+  // Belief Graph (the project's source of truth). Raw inputs live in `sources`;
+  // `beliefNodes` + `coverageAreas` + `questions` are the Understanding layer;
+  // `rounds` snapshot convergence so deltas can be shown between question rounds.
+  sources       Source[]
+  beliefNodes   BeliefNode[]
+  coverageAreas CoverageArea[]
+  questions     Question[]
+  rounds        ProjectRound[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   @@index([accountId])
   @@index([clientId])
   @@map("projects")
+}
+
+// --- Belief Graph -----------------------------------------------------------
+
+// EVIDENCE layer: immutable raw input. The initial briefing is the first
+// Source (round 1); later client answers/transcripts are added as new Sources.
+model Source {
+  id        Int        @id @default(autoincrement())
+  projectId Int
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind      SourceKind @default(BRIEFING)
+  label     String?
+  content   String     @db.Text
+  round     Int        @default(1)
+  createdAt DateTime   @default(now())
+
+  @@index([projectId])
+  @@map("sources")
+}
+
+// UNDERSTANDING layer: one polymorphic table for every belief, wearing the
+// epistemic envelope (status + confidence + provenance + round). `kind`
+// sub-types a REQUIREMENT (feature|goal|rule|nfr|integration|data|platform|
+// stakeholder); `extra` holds type-specific fields (e.g. risk severity).
+// `provenance` is [{ sourceId, span:[start,end], quote }] — why we believe it.
+model BeliefNode {
+  id          Int            @id @default(autoincrement())
+  projectId   Int
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  nodeType    BeliefNodeType @default(REQUIREMENT)
+  kind        String
+  name        String
+  description String?        @db.Text
+  status      BeliefStatus   @default(INFERRED)
+  confidence  Float          @default(0)
+  coverageKey String?
+  provenance  Json           @default("[]")
+  round       Int            @default(1)
+  extra       Json           @default("{}")
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([projectId])
+  @@index([coverageKey])
+  @@map("belief_nodes")
+}
+
+// The convergence engine: one rubric category, with a confidence rolled up from
+// its belief nodes. The weighted project rollup is the "defined enough?" gate.
+model CoverageArea {
+  id               Int            @id @default(autoincrement())
+  projectId        Int
+  project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key              String
+  name             String
+  weight           String         @default("medium") // high | medium | low
+  rollupConfidence Float          @default(0)
+  status           CoverageStatus @default(UNDERDEFINED)
+  round            Int            @default(1)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([projectId, key])
+  @@index([projectId])
+  @@map("coverage_areas")
+}
+
+// A clarifying question with its proposed default answer. Curated in/out, then
+// ANSWERED when the client replies (answer folded back into a new round).
+model Question {
+  id            Int            @id @default(autoincrement())
+  projectId     Int
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  coverageKey   String?
+  text          String         @db.Text
+  assumedAnswer String?        @db.Text
+  impact        QuestionImpact @default(MEDIUM)
+  status        QuestionStatus @default(OPEN)
+  answerText    String?        @db.Text
+  round         Int            @default(1)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([projectId])
+  @@map("questions")
+}
+
+// Snapshot of the weighted project rollup at the end of a round, so the UI can
+// show the convergence delta ("Compliance 20% → 75%") between rounds.
+model ProjectRound {
+  id               Int      @id @default(autoincrement())
+  projectId        Int
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  index            Int
+  rollupConfidence Float    @default(0)
+  createdAt        DateTime @default(now())
+
+  @@unique([projectId, index])
+  @@index([projectId])
+  @@map("project_rounds")
 }
 
 // --- Prompt manager ---------------------------------------------------------
@@ -205,6 +370,10 @@ model PromptRun {
   latencyMs    Int?
   tokensIn     Int?
   tokensOut    Int?
+  // The provider/model that actually served the run (account-configured, not
+  // the prompt version). Null when the call failed before a model responded.
+  provider     String?
+  model        String?
   score        Float?
   meta         Json?
   createdAt    DateTime @default(now())

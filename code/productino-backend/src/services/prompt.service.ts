@@ -21,7 +21,6 @@ export interface PromptVersionSummary {
   version: number;
   isActive: boolean;
   source: string;
-  model: string | null;
   config: Record<string, any>;
   notes: string | null;
   createdAt: Date;
@@ -90,7 +89,6 @@ export class PromptService {
       version: v.version,
       isActive: v.id === prompt.activeVersionId,
       source: v.source,
-      model: (v.config as any)?.model ?? null,
       config: (v.config as Record<string, any>) ?? {},
       notes: v.notes,
       createdAt: v.createdAt,

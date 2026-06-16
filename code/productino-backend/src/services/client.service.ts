@@ -24,9 +24,10 @@ export class ClientService {
     private readonly projects: ProjectRepository,
   ) {}
 
-  // Tenant scoping: super admins see all accounts; everyone else only their own.
+  // Everyone is scoped to their own account; super admins reach other accounts
+  // by impersonating them (impersonation swaps the account context).
   private scope(user: User): Record<string, any> {
-    return user.isSuperAdmin ? {} : { accountId: user.accountId };
+    return { accountId: user.accountId };
   }
 
   async findAll(user: User): Promise<ClientWithStats[]> {
@@ -45,7 +46,7 @@ export class ClientService {
   /** Load a client, enforcing account ownership (super admin sees any). */
   async findOne(id: number, user: User): Promise<Client> {
     const client = await this.clients.findById(id);
-    if (!client || (!user.isSuperAdmin && client.accountId !== user.accountId)) {
+    if (!client || client.accountId !== user.accountId) {
       throw new NotFoundException(`Client ${id} not found`);
     }
     return client;

@@ -9,3 +9,9 @@ export * from './prompt.entity';
 export * from './prompt-version.entity';
 export * from './prompt-run.entity';
 export * from './project.entity';
+// Belief Graph
+export * from './source.entity';
+export * from './belief-node.entity';
+export * from './coverage-area.entity';
+export * from './question.entity';
+export * from './project-round.entity';

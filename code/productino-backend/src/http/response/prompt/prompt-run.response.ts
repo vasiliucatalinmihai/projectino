@@ -20,6 +20,12 @@ export class PromptRunResponse {
   @ApiPropertyOptional({ nullable: true })
   tokensOut: number | null;
 
+  @ApiPropertyOptional({ nullable: true, description: 'Provider that served the run' })
+  provider: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Model that served the run' })
+  model: string | null;
+
   @ApiPropertyOptional({ nullable: true })
   score: number | null;
 
@@ -44,6 +50,8 @@ export class PromptRunResponse {
       latencyMs: r.latencyMs,
       tokensIn: r.tokensIn,
       tokensOut: r.tokensOut,
+      provider: r.provider,
+      model: r.model,
       score: r.score,
       subjectType: r.subjectType,
       subjectId: r.subjectId,

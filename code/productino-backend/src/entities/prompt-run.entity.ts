@@ -11,6 +11,8 @@ export class PromptRun extends BaseEntity {
   latencyMs: number | null;
   tokensIn: number | null;
   tokensOut: number | null;
+  provider: string | null;
+  model: string | null;
   score: number | null;
   meta: Record<string, any> | null;
   createdAt: Date;

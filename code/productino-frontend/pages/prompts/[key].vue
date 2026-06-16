@@ -12,7 +12,6 @@ interface Version {
   version: number;
   isActive: boolean;
   source: string;
-  model: string | null;
   notes: string | null;
   createdAt: string;
   stats: Stats;
@@ -24,6 +23,8 @@ interface Run {
   latencyMs: number | null;
   tokensIn: number | null;
   tokensOut: number | null;
+  provider: string | null;
+  model: string | null;
   score: number | null;
   subjectType: string | null;
   subjectId: number | null;
@@ -67,7 +68,6 @@ function versionNo(versionId: number): string {
         <thead>
           <tr class="font-mono text-[11px] uppercase tracking-wide text-neutral-500">
             <th class="border-b border-neutral-800 px-4 py-2.5 text-left">Version</th>
-            <th class="border-b border-neutral-800 px-4 py-2.5 text-left">Model</th>
             <th class="border-b border-neutral-800 px-4 py-2.5 text-right">Runs</th>
             <th class="border-b border-neutral-800 px-4 py-2.5 text-right">Success</th>
             <th class="border-b border-neutral-800 px-4 py-2.5 text-right">Avg score</th>
@@ -82,7 +82,6 @@ function versionNo(versionId: number): string {
               <span class="font-mono">v{{ v.version }}</span>
               <span v-if="v.isActive" class="ml-2 rounded border border-brand/40 px-1.5 py-0.5 font-mono text-[10px] text-brand">active</span>
             </td>
-            <td class="border-b border-neutral-800/70 px-4 py-2.5 font-mono text-xs">{{ v.model ?? '—' }}</td>
             <td class="border-b border-neutral-800/70 px-4 py-2.5 text-right">{{ v.stats.runs }}</td>
             <td class="border-b border-neutral-800/70 px-4 py-2.5 text-right">{{ dash(v.stats.successRate, '%') }}</td>
             <td class="border-b border-neutral-800/70 px-4 py-2.5 text-right">{{ dash(v.stats.avgScore) }}</td>
@@ -104,6 +103,7 @@ function versionNo(versionId: number): string {
           <tr class="font-mono text-[11px] uppercase tracking-wide text-neutral-500">
             <th class="border-b border-neutral-800 px-4 py-2.5 text-left">When</th>
             <th class="border-b border-neutral-800 px-4 py-2.5 text-left">Version</th>
+            <th class="border-b border-neutral-800 px-4 py-2.5 text-left">Model</th>
             <th class="border-b border-neutral-800 px-4 py-2.5 text-center">OK</th>
             <th class="border-b border-neutral-800 px-4 py-2.5 text-right">Score</th>
             <th class="border-b border-neutral-800 px-4 py-2.5 text-right">Latency</th>
@@ -113,13 +113,14 @@ function versionNo(versionId: number): string {
         </thead>
         <tbody>
           <tr v-if="!prompt.recentRuns.length">
-            <td colspan="7" class="py-6 text-center text-neutral-500">
+            <td colspan="8" class="py-6 text-center text-neutral-500">
               No runs recorded yet — they appear once an AI feature calls this prompt.
             </td>
           </tr>
           <tr v-for="r in prompt.recentRuns" :key="r.id" class="text-sm text-neutral-300">
             <td class="border-b border-neutral-800/70 px-4 py-2.5 text-xs text-neutral-500">{{ fmtDate(r.createdAt) }}</td>
             <td class="border-b border-neutral-800/70 px-4 py-2.5 font-mono text-xs">{{ versionNo(r.versionId) }}</td>
+            <td class="border-b border-neutral-800/70 px-4 py-2.5 font-mono text-xs">{{ r.model ?? '—' }}</td>
             <td class="border-b border-neutral-800/70 px-4 py-2.5 text-center">
               <span v-if="r.success === true" class="text-brand">✓</span>
               <span v-else-if="r.success === false" class="text-red-400">✗</span>

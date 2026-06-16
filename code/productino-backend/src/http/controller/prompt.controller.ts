@@ -37,7 +37,7 @@ export class PromptController {
 
   @Get(':key')
   @ApiOperation({ summary: 'Prompt detail: versions, per-version run stats, recent runs' })
-  @ApiParam({ name: 'key', example: 'gap-analysis' })
+  @ApiParam({ name: 'key', example: 'extract-beliefs' })
   @ApiOkResponse({ type: PromptDetailResponse })
   async detail(@Param('key') key: string): Promise<PromptDetailResponse> {
     const detail = await this.promptService.detail(key);

@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AccountRepository, AiModelRepository } from '../repository';
+import { AiModelRepository } from '../repository';
 import { AiModel, User } from '../entities';
+import { LlmConfigResolverService, LlmService } from '../llm';
+import type { EffectiveModel, ResolvedLlmConfig } from '../llm';
 
-// The shop's default model, used when an account is not "bring your own AI".
-const PLATFORM_PROVIDER = process.env.PLATFORM_AI_PROVIDER || 'anthropic';
-const PLATFORM_MODEL = process.env.PLATFORM_AI_MODEL || 'claude-opus-4-7';
+// Re-export so the `EffectiveModel` shape is still reachable via the services
+// barrel; the canonical definition lives with the LLM resolver.
+export type { EffectiveModel };
 
 // Service-level inputs/outputs (no HTTP DTOs).
 export interface CreateAiModelInput {
@@ -13,7 +15,11 @@ export interface CreateAiModelInput {
   model: string;
   apiKey?: string | null;
   baseUrl?: string | null;
+  options?: Record<string, any>;
   isActive?: boolean;
+  // Super admin only: the account to create the model in. Ignored for tenant
+  // admins (they're pinned to their own account).
+  accountId?: number;
 }
 export interface UpdateAiModelInput {
   label?: string | null;
@@ -21,36 +27,36 @@ export interface UpdateAiModelInput {
   model?: string;
   apiKey?: string | null;
   baseUrl?: string | null;
+  options?: Record<string, any>;
   isActive?: boolean;
 }
-export interface EffectiveModel {
-  source: 'account' | 'platform';
-  provider: string | null;
-  model: string | null;
-  configured: boolean;
+export interface TestConnectionResult {
+  ok: boolean;
+  provider: string;
+  model: string;
+  latencyMs: number | null;
+  message: string | null;
 }
 
 @Injectable()
 export class AiModelService {
   constructor(
     private readonly models: AiModelRepository,
-    private readonly accounts: AccountRepository,
+    private readonly resolver: LlmConfigResolverService,
+    private readonly llm: LlmService,
   ) {}
 
-  findAll(user: User): Promise<AiModel[]> {
-    return this.models.findForAccount(user.accountId);
+  findAll(actingUser: User, accountId?: number): Promise<AiModel[]> {
+    return this.models.findForAccount(this.scopeAccountId(actingUser, accountId));
   }
 
-  async findOne(id: number, user: User): Promise<AiModel> {
-    const model = await this.models.findById(id);
-    if (!model || model.accountId !== user.accountId) {
-      throw new NotFoundException(`AI model ${id} not found`);
-    }
-    return model;
+  findOne(id: number, actingUser: User): Promise<AiModel> {
+    return this.getScoped(id, actingUser);
   }
 
-  async create(input: CreateAiModelInput, user: User): Promise<AiModel> {
-    const existing = await this.models.count({ where: { accountId: user.accountId } });
+  async create(input: CreateAiModelInput, actingUser: User): Promise<AiModel> {
+    const accountId = this.scopeAccountId(actingUser, input.accountId);
+    const existing = await this.models.count({ where: { accountId } });
     // First model for the account becomes active automatically.
     const makeActive = input.isActive ?? existing === 0;
 
@@ -60,60 +66,105 @@ export class AiModelService {
       model: input.model,
       apiKey: input.apiKey ?? null,
       baseUrl: input.baseUrl ?? null,
+      options: input.options ?? {},
       isActive: false,
-      account: { connect: { id: user.accountId } },
+      account: { connect: { id: accountId } },
     } as any);
 
-    if (makeActive) return this.setActive(created.id, user.accountId);
+    if (makeActive) return this.setActive(created.id, accountId);
     return created;
   }
 
-  async update(id: number, input: UpdateAiModelInput, user: User): Promise<AiModel> {
-    await this.findOne(id, user);
+  async update(id: number, input: UpdateAiModelInput, actingUser: User): Promise<AiModel> {
+    const target = await this.getScoped(id, actingUser);
 
     const data: Record<string, any> = {};
     if (input.label !== undefined) data.label = input.label || null;
     if (input.provider !== undefined) data.provider = input.provider;
     if (input.model !== undefined) data.model = input.model;
     if (input.baseUrl !== undefined) data.baseUrl = input.baseUrl || null;
+    if (input.options !== undefined) data.options = input.options ?? {};
     // Only overwrite the credential when a new one is supplied.
     if (input.apiKey !== undefined && input.apiKey !== '') data.apiKey = input.apiKey;
 
     const updated = await this.models.update(id, data);
 
-    if (input.isActive === true) return this.setActive(id, user.accountId);
+    if (input.isActive === true) return this.setActive(id, target.accountId);
     if (input.isActive === false) return this.models.update(id, { isActive: false });
     return updated;
   }
 
-  async activate(id: number, user: User): Promise<AiModel> {
-    await this.findOne(id, user);
-    return this.setActive(id, user.accountId);
+  async activate(id: number, actingUser: User): Promise<AiModel> {
+    const target = await this.getScoped(id, actingUser);
+    return this.setActive(id, target.accountId);
   }
 
-  async remove(id: number, user: User): Promise<AiModel> {
-    await this.findOne(id, user);
+  async remove(id: number, actingUser: User): Promise<AiModel> {
+    await this.getScoped(id, actingUser);
     return this.models.delete(id);
   }
 
-  /** Which model the account would use to process projects, given its BYO flag. */
-  async effectiveForAccount(user: User): Promise<EffectiveModel> {
-    const account = await this.accounts.findById(user.accountId);
-    if (account?.bringYourOwnAi) {
-      const active = await this.models.findActiveForAccount(user.accountId);
-      return {
-        source: 'account',
-        provider: active?.provider ?? null,
-        model: active?.model ?? null,
-        configured: !!active,
-      };
-    }
-    return {
-      source: 'platform',
-      provider: PLATFORM_PROVIDER,
-      model: PLATFORM_MODEL,
-      configured: true,
+  /**
+   * Which model an account would use to process projects, given its BYO flag.
+   * Tenant users see their own account; super admins may target an accountId.
+   * Delegates to the LLM resolver so this and the actual call path agree.
+   */
+  effectiveForAccount(actingUser: User, accountId?: number): Promise<EffectiveModel> {
+    return this.resolver.describe(this.scopeAccountId(actingUser, accountId));
+  }
+
+  /**
+   * Validate a model's stored credentials with a tiny live call. Never throws on
+   * a provider/auth failure — returns { ok:false, message } so the UI can show it.
+   */
+  async testConnection(id: number, actingUser: User): Promise<TestConnectionResult> {
+    const m = await this.getScoped(id, actingUser);
+    const base: TestConnectionResult = {
+      ok: false,
+      provider: m.provider,
+      model: m.model,
+      latencyMs: null,
+      message: null,
     };
+    if (!m.apiKey) {
+      return { ...base, message: 'No API key configured on this model.' };
+    }
+
+    const config: ResolvedLlmConfig = {
+      source: 'account',
+      provider: m.provider,
+      model: m.model,
+      apiKey: m.apiKey,
+      baseUrl: m.baseUrl,
+      options: (m.options as Record<string, any>) ?? {},
+    };
+
+    const t0 = Date.now();
+    try {
+      await this.llm.runWith(config, {
+        messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
+        maxTokens: 16,
+      });
+      return { ...base, ok: true, latencyMs: Date.now() - t0 };
+    } catch (e: any) {
+      return { ...base, latencyMs: Date.now() - t0, message: e?.message ?? String(e) };
+    }
+  }
+
+  // ── helpers ─────────────────────────────────────────────────────
+
+  // Which account an operation applies to: super admins may target any account;
+  // tenant users are pinned to their own (a requested accountId is ignored).
+  private scopeAccountId(actingUser: User, requested?: number): number {
+    return actingUser.isSuperAdmin ? requested ?? actingUser.accountId : actingUser.accountId;
+  }
+
+  private async getScoped(id: number, actingUser: User): Promise<AiModel> {
+    const model = await this.models.findById(id);
+    if (!model || (!actingUser.isSuperAdmin && model.accountId !== actingUser.accountId)) {
+      throw new NotFoundException(`AI model ${id} not found`);
+    }
+    return model;
   }
 
   // Exactly one active model per account.

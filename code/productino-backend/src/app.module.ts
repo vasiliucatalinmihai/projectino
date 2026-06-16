@@ -3,7 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
 
-import { PrismaService } from './prisma.service';
+import { PrismaModule } from './prisma.module';
+import { LlmModule } from './llm';
 
 // Controllers — add new ones here
 import { AuthController } from './http/controller/auth.controller';
@@ -13,6 +14,8 @@ import { UserController } from './http/controller/user.controller';
 import { ClientController } from './http/controller/client.controller';
 import { AiModelController } from './http/controller/ai-model.controller';
 import { ProjectController } from './http/controller/project.controller';
+import { ProjectGraphController } from './http/controller/project-graph.controller';
+import { DashboardController } from './http/controller/dashboard.controller';
 import { SettingController } from './http/controller/setting.controller';
 import { PromptController } from './http/controller/prompt.controller';
 
@@ -23,7 +26,10 @@ import {
   UserService,
   ClientService,
   AiModelService,
+  AiModelCatalogService,
   ProjectService,
+  BeliefGraphService,
+  DashboardService,
   SettingService,
   PromptManagerService,
   PromptService,
@@ -41,6 +47,11 @@ import {
   PromptRunRepository,
   SettingRepository,
   UserRepository,
+  SourceRepository,
+  BeliefNodeRepository,
+  CoverageAreaRepository,
+  QuestionRepository,
+  ProjectRoundRepository,
 } from './repository';
 
 // Cross-cutting HTTP
@@ -56,6 +67,8 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
       secret: process.env.JWT_SECRET || 'dev-secret-change-me',
       signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
     }),
+    PrismaModule,
+    LlmModule,
   ],
   controllers: [
     AuthController,
@@ -65,11 +78,12 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
     ClientController,
     AiModelController,
     ProjectController,
+    ProjectGraphController,
+    DashboardController,
     SettingController,
     PromptController,
   ],
   providers: [
-    PrismaService,
     // repositories
     AccountRepository,
     UserRepository,
@@ -81,13 +95,21 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
     PromptVersionRepository,
     PromptRunRepository,
     ProjectRepository,
+    SourceRepository,
+    BeliefNodeRepository,
+    CoverageAreaRepository,
+    QuestionRepository,
+    ProjectRoundRepository,
     // services
     AuthService,
     AccountService,
     UserService,
     ClientService,
     AiModelService,
+    AiModelCatalogService,
     ProjectService,
+    BeliefGraphService,
+    DashboardService,
     SettingService,
     PromptManagerService,
     PromptService,

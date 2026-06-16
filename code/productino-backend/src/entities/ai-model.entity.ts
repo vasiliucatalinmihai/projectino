@@ -10,6 +10,7 @@ export class AiModel extends BaseEntity {
   model: string;
   apiKey: string | null;
   baseUrl: string | null;
+  options: Record<string, any>;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;

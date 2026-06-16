@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ProjectStage } from '@prisma/client';
-import { ClientRepository, ProjectRepository } from '../repository';
+import { ProjectStage, SourceKind } from '@prisma/client';
+import { ClientRepository, ProjectRepository, SourceRepository } from '../repository';
 import { Client, Project, User } from '../entities';
 
 // Service-level inputs (no HTTP DTOs).
@@ -16,22 +16,31 @@ export interface UpdateProjectInput {
   stage?: ProjectStage;
 }
 
+// Load the briefing source alongside the project so `project.briefing` resolves.
+const PROJECT_INCLUDE = {
+  client: true,
+  account: true,
+  sources: { where: { kind: SourceKind.BRIEFING }, orderBy: { id: 'asc' as const }, take: 1 },
+};
+
 @Injectable()
 export class ProjectService {
   constructor(
     private readonly projects: ProjectRepository,
     private readonly clients: ClientRepository,
+    private readonly sources: SourceRepository,
   ) {}
 
-  // Tenant scoping: super admins see all accounts; everyone else only their own.
+  // Everyone is scoped to their own account; super admins reach other accounts
+  // by impersonating them (impersonation swaps the account context).
   private scope(user: User): Record<string, any> {
-    return user.isSuperAdmin ? {} : { accountId: user.accountId };
+    return { accountId: user.accountId };
   }
 
   findAll(user: User): Promise<Project[]> {
     return this.projects.findMany({
       where: this.scope(user),
-      include: { client: true, account: true },
+      include: PROJECT_INCLUDE,
       orderBy: { id: 'desc' },
     });
   }
@@ -39,9 +48,9 @@ export class ProjectService {
   async findOne(id: number, user: User): Promise<Project> {
     const project = await this.projects.findUnique({
       where: { id },
-      include: { client: true, account: true },
+      include: PROJECT_INCLUDE,
     });
-    if (!project || (!user.isSuperAdmin && project.accountId !== user.accountId)) {
+    if (!project || project.accountId !== user.accountId) {
       throw new NotFoundException(`Project ${id} not found`);
     }
     return project;
@@ -50,7 +59,7 @@ export class ProjectService {
   /** Resolve a client the user may use, enforcing account ownership. */
   private async resolveClient(clientId: number, user: User): Promise<Client> {
     const client = await this.clients.findById(clientId);
-    if (!client || (!user.isSuperAdmin && client.accountId !== user.accountId)) {
+    if (!client || client.accountId !== user.accountId) {
       throw new BadRequestException(`Client ${clientId} not found in your account`);
     }
     return client;
@@ -61,35 +70,57 @@ export class ProjectService {
     const client = await this.resolveClient(input.clientId, user);
     const project = await this.projects.create({
       name: input.name,
-      briefing: input.briefing ?? null,
       account: { connect: { id: client.accountId } },
       client: { connect: { id: client.id } },
     } as any);
+    // The initial briefing becomes the first Source (round 1) of the Belief Graph.
+    if (input.briefing) {
+      await this.upsertBriefing(project.id, input.briefing);
+    }
     return this.findOne(project.id, user);
   }
 
   async update(id: number, input: UpdateProjectInput, user: User): Promise<Project> {
     const project = await this.findOne(id, user); // enforces account ownership
-    const data: any = { ...input };
+    const { briefing, clientId, ...rest } = input;
+    const data: any = { ...rest };
 
-    if (input.clientId !== undefined && input.clientId !== project.clientId) {
-      const client = await this.resolveClient(input.clientId, user);
+    if (clientId !== undefined && clientId !== project.clientId) {
+      const client = await this.resolveClient(clientId, user);
       if (client.accountId !== project.accountId) {
         throw new BadRequestException('Cannot move a project to a client in another account');
       }
-      delete data.clientId;
       data.client = { connect: { id: client.id } };
-    } else {
-      delete data.clientId;
     }
 
-    await this.projects.update(id, data);
+    if (Object.keys(data).length > 0) {
+      await this.projects.update(id, data);
+    }
+    if (briefing !== undefined) {
+      await this.upsertBriefing(id, briefing);
+    }
     return this.findOne(id, user);
   }
 
   async remove(id: number, user: User): Promise<Project> {
     const project = await this.findOne(id, user);
-    await this.projects.delete(id);
+    await this.projects.delete(id); // cascades to the Belief Graph (sources, nodes, …)
     return project;
+  }
+
+  /** Create or replace the project's BRIEFING source (the seed input). */
+  private async upsertBriefing(projectId: number, briefing: string | null): Promise<void> {
+    const existing = await this.sources.findBriefing(projectId);
+    const content = briefing ?? '';
+    if (existing) {
+      await this.sources.update(existing.id, { content } as any);
+    } else if (content) {
+      await this.sources.create({
+        project: { connect: { id: projectId } },
+        kind: SourceKind.BRIEFING,
+        content,
+        round: 1,
+      } as any);
+    }
   }
 }

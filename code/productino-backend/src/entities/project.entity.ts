@@ -1,7 +1,8 @@
-import { ProjectStage } from '@prisma/client';
+import { ProjectStage, SourceKind } from '@prisma/client';
 import { Account } from './account.entity';
 import { BaseEntity } from './base.entity';
 import { Client } from './client.entity';
+import { Source } from './source.entity';
 
 export class Project extends BaseEntity {
   id: number;
@@ -10,8 +11,10 @@ export class Project extends BaseEntity {
   clientId: number;
   client?: Client;
   name: string;
-  briefing: string | null;
   stage: ProjectStage;
+  // Loaded when requested. The raw inputs of the Belief Graph; the initial
+  // briefing is the BRIEFING source.
+  sources?: Source[];
   createdAt: Date;
   updatedAt: Date;
 
@@ -25,7 +28,14 @@ export class Project extends BaseEntity {
     this.stage = stage;
   }
 
+  /** The initial briefing text, derived from the BRIEFING source if loaded. */
+  get briefing(): string | null {
+    const src = this.sources?.find((s) => s.kind === SourceKind.BRIEFING);
+    return src?.content ?? null;
+  }
+
   get hasBriefing(): boolean {
-    return !!this.briefing && this.briefing.trim().length > 0;
+    const b = this.briefing;
+    return !!b && b.trim().length > 0;
   }
 }
