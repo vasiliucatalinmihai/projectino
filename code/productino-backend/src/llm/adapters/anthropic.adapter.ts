@@ -5,10 +5,12 @@ import { AdapterResult, BaseLlmAdapter } from './llm-provider.adapter';
 /**
  * Anthropic Messages API adapter (`POST /v1/messages`).
  *
- * Zero-dependency over `fetch`. The system prompt goes at the top level (not as
- * a message); the model's stored `options` and the per-call `options` are
- * spread into the body so advanced features (output_config, thinking, …) work
- * without this adapter modelling each one.
+ * Zero-dependency over `fetch`. Two upgrades over plain text generation:
+ *  - **Strict structured output** via tool-use: when `req.responseSchema` is set,
+ *    a tool with that JSON Schema is forced and the parsed `tool_use.input` is
+ *    returned (no JSON-from-prose parsing).
+ *  - **Prompt caching**: the system block is marked `cache_control: ephemeral`
+ *    so a reused prefix isn't re-billed (Anthropic caches ≥1024-token prefixes).
  */
 @Injectable()
 export class AnthropicAdapter extends BaseLlmAdapter {
@@ -20,11 +22,12 @@ export class AnthropicAdapter extends BaseLlmAdapter {
     // Anthropic takes `system` at the top level; fold any system-role messages in.
     const messages: Array<{ role: string; content: string }> = [];
     const systemParts: string[] = [];
-    for (const m of req.messages) {
-      if (m.role === 'system') systemParts.push(m.content);
-      else messages.push({ role: m.role, content: m.content });
+    for (const message of req.messages) {
+      if (message.role === 'system') systemParts.push(message.content);
+      else messages.push({ role: message.role, content: message.content });
     }
-    if (req.json) {
+    // With tool-use we don't need a "respond in JSON" nudge.
+    if (req.json && !req.responseSchema) {
       systemParts.push('Respond with only a single valid JSON object and no other text.');
     }
 
@@ -37,9 +40,25 @@ export class AnthropicAdapter extends BaseLlmAdapter {
       messages,
     };
 
-    const system = [body.system, req.system, ...systemParts].filter(Boolean);
-    if (system.length) body.system = system.join('\n\n');
-    else delete body.system;
+    // Strict structured output: force a single tool call shaped by the schema.
+    if (req.responseSchema) {
+      body.tools = [
+        {
+          name: req.responseSchema.name,
+          description: req.responseSchema.description ?? 'Return the structured result.',
+          input_schema: req.responseSchema.schema,
+        },
+      ];
+      body.tool_choice = { type: 'tool', name: req.responseSchema.name };
+    }
+
+    // System prompt — cached so a reused prefix isn't re-billed.
+    const systemText = [body.system, req.system, ...systemParts].filter(Boolean).join('\n\n');
+    if (systemText) {
+      body.system = [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }];
+    } else {
+      delete body.system;
+    }
 
     if (req.temperature !== undefined) body.temperature = req.temperature;
 
@@ -49,16 +68,20 @@ export class AnthropicAdapter extends BaseLlmAdapter {
         'content-type': 'application/json',
         'x-api-key': config.apiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'prompt-caching-2024-07-31',
       },
       body,
     );
 
-    const text = Array.isArray(data?.content)
-      ? data.content
-          .filter((b: any) => b?.type === 'text')
-          .map((b: any) => b.text)
-          .join('')
-      : '';
+    const blocks: any[] = Array.isArray(data?.content) ? data.content : [];
+    // Prefer the tool_use input (already structured); else concatenate text.
+    const toolUse = blocks.find((b) => b?.type === 'tool_use' && b?.input);
+    const text = toolUse
+      ? JSON.stringify(toolUse.input)
+      : blocks
+          .filter((b) => b?.type === 'text')
+          .map((b) => b.text)
+          .join('');
 
     return {
       text,
@@ -66,6 +89,7 @@ export class AnthropicAdapter extends BaseLlmAdapter {
         tokensIn: data?.usage?.input_tokens ?? null,
         tokensOut: data?.usage?.output_tokens ?? null,
       },
+      finishReason: data?.stop_reason ?? null,
     };
   }
 }

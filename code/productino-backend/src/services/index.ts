@@ -11,6 +11,8 @@ export * from './definition.service';
 export * from './delivery.service';
 export * from './proposal.service';
 export * from './pipeline-reset.service';
+export * from './pipeline-lock.service';
+export * from './graph-validation.service';
 export * from './dashboard.service';
 export * from './setting.service';
 export * from './client.service';

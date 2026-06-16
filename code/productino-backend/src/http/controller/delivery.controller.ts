@@ -9,7 +9,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { DeliveryService } from '../../services';
+import { DeliveryService, PipelineLockService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { User } from '../../entities';
 import { CurrentUser, RequirePermissions } from '../decorators';
@@ -21,7 +21,10 @@ import { DeliveryResponse } from '../response/delivery';
 @ApiForbiddenResponse({ description: 'Insufficient permission' })
 @Controller('projects/:projectId/delivery')
 export class DeliveryController {
-  constructor(private readonly delivery: DeliveryService) {}
+  constructor(
+    private readonly delivery: DeliveryService,
+    private readonly lock: PipelineLockService,
+  ) {}
 
   @Get()
   @RequirePermissions(PermissionKey.VIEW_ONLY)
@@ -50,6 +53,8 @@ export class DeliveryController {
     @Param('projectId', ParseIntPipe) projectId: number,
     @CurrentUser() user: User,
   ): Promise<DeliveryResponse> {
-    return new DeliveryResponse(await this.delivery.generate(projectId, user));
+    return new DeliveryResponse(
+      await this.lock.run(projectId, () => this.delivery.generate(projectId, user)),
+    );
   }
 }

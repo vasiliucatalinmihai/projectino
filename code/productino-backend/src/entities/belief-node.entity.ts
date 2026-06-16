@@ -6,6 +6,10 @@ export interface Provenance {
   sourceId: number;
   span?: [number, number];
   quote?: string;
+  /** Whether the quote was actually found in the source (anti-hallucination). */
+  grounded?: boolean;
+  /** How the quote was located: exact / whitespace-normalized / fuzzy / not found. */
+  match?: 'exact' | 'normalized' | 'fuzzy' | 'none';
 }
 
 /**

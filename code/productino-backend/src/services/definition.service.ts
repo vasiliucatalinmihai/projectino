@@ -1,11 +1,6 @@
-import {
-  BadGatewayException,
-  BadRequestException,
-  Injectable,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { ProjectStage, QuestionStatus } from '@prisma/client';
-import { PromptKey, RenderedPrompt } from '../common/prompt-key';
+import { PromptKey } from '../common/prompt-key';
 import { RUBRIC } from '../common/rubric';
 import { BeliefNode, CoverageArea, ProductDefinition, Question, User } from '../entities';
 import {
@@ -16,9 +11,8 @@ import {
   ProjectRoundRepository,
   QuestionRepository,
 } from '../repository';
-import { LlmNotConfiguredError, LlmProviderError, LlmRequest, LlmService } from '../llm';
+import { StructuredLlmService, SynthesizePrdSchema } from '../llm';
 import { ProjectService } from './project.service';
-import { PromptManagerService } from './prompt-manager.service';
 import { PipelineResetService } from './pipeline-reset.service';
 
 /** Minimum weighted rollup (0–1) to generate a PRD without an explicit override. */
@@ -32,7 +26,7 @@ export interface GenerateDefinitionInput {
 /**
  * Phase 5: project the confident Belief Graph into a versioned PRD. Gated on the
  * latest round's rollup — below the gate, generation requires an explicit
- * override (recorded on the definition).
+ * override (recorded on the definition). Output validated by SynthesizePrdSchema.
  */
 @Injectable()
 export class DefinitionService {
@@ -44,8 +38,7 @@ export class DefinitionService {
     private readonly questions: QuestionRepository,
     private readonly rounds: ProjectRoundRepository,
     private readonly definitions: ProductDefinitionRepository,
-    private readonly prompts: PromptManagerService,
-    private readonly llm: LlmService,
+    private readonly structured: StructuredLlmService,
     private readonly reset: PipelineResetService,
   ) {}
 
@@ -76,7 +69,7 @@ export class DefinitionService {
           `Confidence ${Math.round(rollupConfidence * 100)}% is below the ` +
           `${Math.round(DEFINITION_GATE * 100)}% gate. Resolve more questions or override.`,
         gate: true,
-        rollupConfidence: rollupConfidence,
+        rollupConfidence,
         threshold: DEFINITION_GATE,
       });
     }
@@ -87,44 +80,18 @@ export class DefinitionService {
       this.questions.findAllForProject(projectId),
     ]);
 
-    const rendered = this.prompts.get(PromptKey.SYNTHESIZE_PRD, {
-      coverageList: this.coverageList(areas),
-      beliefsList: this.beliefsList(nodes),
-      answeredList: this.answeredList(questions),
+    const content = await this.structured.run({
+      key: PromptKey.SYNTHESIZE_PRD,
+      vars: {
+        coverageList: this.coverageList(areas),
+        beliefsList: this.beliefsList(nodes),
+        answeredList: this.answeredList(questions),
+      },
+      schema: SynthesizePrdSchema,
+      accountId: user.accountId,
+      subject: { type: 'project', id: project.id },
+      scoreOf: () => rollupConfidence,
     });
-    const req: LlmRequest = {
-      messages: [{ role: 'user', content: rendered.content }],
-      json: true,
-      maxTokens: rendered.config.maxTokens,
-      temperature: rendered.config.temperature,
-    };
-
-    const startedAt = Date.now();
-    let text: string;
-    let provider: string;
-    let model: string;
-    let tokensIn: number | null;
-    let tokensOut: number | null;
-    try {
-      const result = await this.llm.run(user.accountId, req);
-      ({ text, provider, model } = result);
-      ({ tokensIn, tokensOut } = result.usage);
-    } catch (error) {
-      await this.recordFailure(rendered, project.id, Date.now() - startedAt, error);
-      if (error instanceof LlmNotConfiguredError)
-        throw new UnprocessableEntityException(error.message);
-      if (error instanceof LlmProviderError) throw new BadGatewayException(error.message);
-      throw error;
-    }
-    const latencyMs = Date.now() - startedAt;
-
-    let content: Record<string, any>;
-    try {
-      content = this.parseJsonObject(text);
-    } catch (error: any) {
-      await this.recordFailure(rendered, project.id, latencyMs, error);
-      throw new UnprocessableEntityException('Model did not return valid PRD JSON');
-    }
 
     const version = (await this.definitions.countForProject(projectId)) + 1;
     const saved = await this.definitions.create({
@@ -135,20 +102,6 @@ export class DefinitionService {
       gateOverride: belowGate && !!input.override,
       overrideReason: belowGate && input.override ? (input.overrideReason ?? null) : null,
     } as any);
-
-    await this.prompts.recordOutcome(
-      rendered,
-      {
-        success: true,
-        latencyMs,
-        tokensIn: tokensIn ?? undefined,
-        tokensOut: tokensOut ?? undefined,
-        provider,
-        model,
-        score: rollupConfidence,
-      },
-      { subjectType: 'project', subjectId: project.id },
-    );
 
     // Move into DEFINITION (don't regress later stages).
     if (
@@ -165,7 +118,7 @@ export class DefinitionService {
     return saved;
   }
 
-  // ── helpers ─────────────────────────────────────────────────────
+  // ── prompt-input builders ────────────────────────────────────────
 
   private coverageList(areas: CoverageArea[]): string {
     const areasByKey = new Map(areas.map((area) => [area.key, area]));
@@ -211,77 +164,5 @@ export class DefinitionService {
     return answered
       .map((question) => `- Q: ${question.text}\n  A: ${question.answerText}`)
       .join('\n');
-  }
-
-  private parseJsonObject(text: string): Record<string, any> {
-    let trimmed = (text ?? '').trim();
-    if (trimmed.startsWith('```')) {
-      trimmed = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-    }
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-    if (start === -1 || end === -1 || end < start) throw new Error('no JSON object in output');
-    const parsed = JSON.parse(trimmed.slice(start, end + 1));
-    if (!parsed || typeof parsed !== 'object' || !parsed.summary)
-      throw new Error('PRD missing summary');
-    return this.normalize(parsed);
-  }
-
-  /** Coerce list fields to string[] and stories/risks to clean objects (models
-   *  sometimes return a string where an array is expected). */
-  private normalize(parsed: any): Record<string, any> {
-    return {
-      ...parsed,
-      summary: this.toText(parsed.summary),
-      in_scope: this.toStringList(parsed.in_scope),
-      out_of_scope: this.toStringList(parsed.out_of_scope),
-      non_functional: this.toStringList(parsed.non_functional),
-      assumptions: this.toStringList(parsed.assumptions),
-      user_stories: (Array.isArray(parsed.user_stories) ? parsed.user_stories : [])
-        .filter((userStory: any) => userStory && typeof userStory === 'object' && userStory.story)
-        .map((userStory: any) => ({
-          role: this.toText(userStory.role),
-          story: this.toText(userStory.story),
-          acceptance_criteria: this.toStringList(userStory.acceptance_criteria),
-        })),
-      risks: (Array.isArray(parsed.risks) ? parsed.risks : [])
-        .filter((risk: any) => risk && typeof risk === 'object' && risk.description)
-        .map((risk: any) => ({
-          description: this.toText(risk.description),
-          severity: ['high', 'medium', 'low'].includes(String(risk.severity).toLowerCase())
-            ? String(risk.severity).toLowerCase()
-            : 'medium',
-          mitigation: this.toText(risk.mitigation),
-        })),
-    };
-  }
-
-  private toStringList(value: any): string[] {
-    if (Array.isArray(value)) return value.map((item) => this.toText(item)).filter(Boolean);
-    const text = this.toText(value).trim();
-    if (!text) return [];
-    const parts = text.split(/\n+|[;•]\s*/).map((part) => part.trim()).filter(Boolean);
-    return parts.length > 1 ? parts : [text];
-  }
-
-  private toText(value: any): string {
-    return typeof value === 'string' ? value : value == null ? '' : String(value);
-  }
-
-  private async recordFailure(
-    rendered: RenderedPrompt,
-    projectId: number,
-    latencyMs: number,
-    error: any,
-  ): Promise<void> {
-    try {
-      await this.prompts.recordOutcome(
-        rendered,
-        { success: false, latencyMs, meta: { error: error?.message ?? String(error) } },
-        { subjectType: 'project', subjectId: projectId },
-      );
-    } catch {
-      // Logging the outcome must never mask the original error.
-    }
   }
 }

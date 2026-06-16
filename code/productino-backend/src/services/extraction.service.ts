@@ -1,36 +1,24 @@
-import {
-  BadGatewayException,
-  BadRequestException,
-  Injectable,
-  UnprocessableEntityException,
-} from '@nestjs/common';
-import { BeliefNodeType, BeliefStatus, ProjectStage } from '@prisma/client';
-import { PromptKey, RenderedPrompt } from '../common/prompt-key';
-import { RUBRIC_KEYS, RUBRIC_PROMPT_LIST } from '../common/rubric';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { BeliefStatus, ProjectStage } from '@prisma/client';
+import { PromptKey } from '../common/prompt-key';
+import { RUBRIC_PROMPT_LIST } from '../common/rubric';
 import { BeliefNode, Provenance, Source, User } from '../entities';
 import { BeliefNodeRepository, ProjectRepository, SourceRepository } from '../repository';
-import { LlmNotConfiguredError, LlmProviderError, LlmRequest, LlmService } from '../llm';
+import { ExtractBeliefsResult, ExtractBeliefsSchema, StructuredLlmService } from '../llm';
 import { ProjectService } from './project.service';
-import { PromptManagerService } from './prompt-manager.service';
 import { PipelineResetService } from './pipeline-reset.service';
+import { GraphValidationService } from './graph-validation.service';
 
-const NODE_TYPES = new Set(Object.values(BeliefNodeType));
-const STATUSES = new Set(Object.values(BeliefStatus));
-const KINDS = new Set([
-  'feature',
-  'goal',
-  'rule',
-  'nfr',
-  'integration',
-  'data',
-  'platform',
-  'stakeholder',
-]);
+/** Beyond this, an "ASSUMED" belief can't claim more certainty than a default. */
+const UNGROUNDED_CONFIDENCE_CAP = 0.4;
+
+type ExtractedBelief = ExtractBeliefsResult['beliefs'][number];
 
 /**
  * Phase 2: turn a project Source into structured BeliefNodes (the Understanding
- * layer) via the account's configured LLM. Re-running for the same round
- * replaces that round's nodes, so extraction is idempotent per source round.
+ * layer). The model output is validated + normalized by ExtractBeliefsSchema via
+ * StructuredLlmService; this service only resolves the source, persists nodes,
+ * and cascades. Re-running for the same round replaces that round's nodes.
  */
 @Injectable()
 export class ExtractionService {
@@ -39,91 +27,49 @@ export class ExtractionService {
     private readonly projectRepo: ProjectRepository,
     private readonly sources: SourceRepository,
     private readonly nodes: BeliefNodeRepository,
-    private readonly prompts: PromptManagerService,
-    private readonly llm: LlmService,
+    private readonly structured: StructuredLlmService,
     private readonly reset: PipelineResetService,
+    private readonly graphValidation: GraphValidationService,
   ) {}
 
-  /**
-   * Extract beliefs from a project source (defaults to the briefing) and persist
-   * them. Returns the created nodes.
-   */
+  /** Extract beliefs from a project source (defaults to the briefing) and persist them. */
   async run(projectId: number, user: User, sourceId?: number): Promise<BeliefNode[]> {
     const project = await this.projects.findOne(projectId, user); // enforces tenancy
     const source = await this.resolveSource(projectId, sourceId);
 
-    const rendered = this.prompts.get(PromptKey.EXTRACT_BELIEFS, {
-      source: source.content,
-      sourceKind: source.kind,
-      rubricList: RUBRIC_PROMPT_LIST,
+    const { beliefs } = await this.structured.run({
+      key: PromptKey.EXTRACT_BELIEFS,
+      vars: { source: source.content, sourceKind: source.kind, rubricList: RUBRIC_PROMPT_LIST },
+      schema: ExtractBeliefsSchema,
+      accountId: user.accountId,
+      subject: { type: 'project', id: project.id },
+      scoreOf: (value) => value.beliefs.length,
+      // Anti-hallucination: every quote must be findable in the source. Unfound
+      // quotes trigger a repair asking the model to re-quote verbatim.
+      validate: (value) => this.gradeGrounding(value, source),
     });
-    const request: LlmRequest = {
-      messages: [{ role: 'user', content: rendered.content }],
-      json: true,
-      maxTokens: rendered.config.maxTokens,
-      temperature: rendered.config.temperature,
-    };
-
-    const startedAt = Date.now();
-    let text: string;
-    let provider: string;
-    let model: string;
-    let tokensIn: number | null;
-    let tokensOut: number | null;
-    try {
-      const response = await this.llm.run(user.accountId, request);
-      ({ text, provider, model } = response);
-      ({ tokensIn, tokensOut } = response.usage);
-    } catch (error) {
-      await this.recordFailure(rendered, project.id, Date.now() - startedAt, error);
-      if (error instanceof LlmNotConfiguredError) throw new UnprocessableEntityException(error.message);
-      if (error instanceof LlmProviderError) throw new BadGatewayException(error.message);
-      throw error;
-    }
-    const latencyMs = Date.now() - startedAt;
-
-    let beliefs: any[];
-    try {
-      beliefs = this.parseBeliefs(text);
-    } catch (error: any) {
-      await this.recordFailure(rendered, project.id, latencyMs, error);
-      throw new UnprocessableEntityException('Model did not return valid belief JSON');
-    }
 
     // Idempotent per round: replace any nodes previously extracted for this round.
     await this.nodes.deleteMany({ projectId, round: source.round });
 
     const created: BeliefNode[] = [];
     for (const belief of beliefs) {
+      const grounded = this.ground(belief, source);
       created.push(
         await this.nodes.create({
           project: { connect: { id: project.id } },
-          nodeType: this.toNodeType(belief.nodeType),
-          kind: this.toKind(belief.kind),
-          name: this.toText(belief.name).slice(0, 200),
-          description: this.toText(belief.description) || null,
-          status: this.toStatus(belief.status),
-          confidence: this.clampConfidence(belief.confidence),
-          coverageKey: this.toCoverageKey(belief.coverageKey),
-          provenance: this.toProvenance(belief.quote, source),
+          nodeType: belief.nodeType,
+          kind: belief.kind,
+          name: belief.name.slice(0, 200),
+          description: belief.description,
+          status: grounded.status,
+          confidence: grounded.confidence,
+          coverageKey: belief.coverageKey,
+          provenance: grounded.provenance,
           round: source.round,
         } as any),
       );
     }
-
-    await this.prompts.recordOutcome(
-      rendered,
-      {
-        success: true,
-        latencyMs,
-        tokensIn: tokensIn ?? undefined,
-        tokensOut: tokensOut ?? undefined,
-        provider,
-        model,
-        score: created.length,
-      },
-      { subjectType: 'project', subjectId: project.id },
-    );
 
     // First extraction moves the project into analysis; don't regress later stages.
     if (project.stage === ProjectStage.BRIEFING) {
@@ -136,8 +82,6 @@ export class ExtractionService {
 
     return created;
   }
-
-  // ── helpers ─────────────────────────────────────────────────────
 
   private async resolveSource(projectId: number, sourceId?: number): Promise<Source> {
     const source = sourceId
@@ -152,82 +96,54 @@ export class ExtractionService {
     return source;
   }
 
-  /** Extract the JSON object from the model's text (tolerates fences / prose). */
-  private parseBeliefs(text: string): any[] {
-    let trimmed = (text ?? '').trim();
-    if (trimmed.startsWith('```')) {
-      trimmed = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  /** Semantic check fed to the repair loop: are the beliefs' quotes real? */
+  private gradeGrounding(value: ExtractBeliefsResult, source: Source) {
+    const grading = this.graphValidation.gradeBeliefs(value.beliefs, source.content);
+    const metrics = {
+      groundingRate: grading.rate,
+      graded: grading.graded,
+      grounded: grading.grounded,
+      ungrounded: grading.ungrounded.length,
+    };
+    if (!grading.ungrounded.length) return { ok: true, metrics };
+    const names = grading.ungrounded.slice(0, 8).map((name) => `"${name}"`).join(', ');
+    return {
+      ok: false,
+      metrics,
+      repairMessage:
+        `${grading.ungrounded.length} belief quote(s) were NOT found in the SOURCE: ${names}. ` +
+        'For each, copy the exact supporting text verbatim from the SOURCE into "quote", ' +
+        'or set "quote" to "" and make the belief ASSUMED.',
+    };
+  }
+
+  /**
+   * Ground one belief against its source. A quote that's found yields a real
+   * provenance entry (with a span for exact/normalized matches). A quote that
+   * can't be found is treated as unsupported: the belief is downgraded to
+   * ASSUMED with capped confidence and flagged, never silently kept as stated.
+   */
+  private ground(
+    belief: ExtractedBelief,
+    source: Source,
+  ): { status: BeliefStatus; confidence: number; provenance: Provenance[] } {
+    const quote = (belief.quote ?? '').trim();
+    // No quote = a legitimately unsourced default (ASSUMED); leave it as-is.
+    if (!quote) {
+      return { status: belief.status as BeliefStatus, confidence: belief.confidence, provenance: [] };
     }
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-    if (start === -1 || end === -1 || end < start) throw new Error('no JSON object in output');
-    const parsed = JSON.parse(trimmed.slice(start, end + 1));
-    if (!parsed || !Array.isArray(parsed.beliefs)) throw new Error('output missing beliefs[]');
-    return parsed.beliefs.filter(
-      (belief: any) => belief && typeof belief === 'object' && this.toText(belief.name).trim(),
-    );
-  }
 
-  private toNodeType(value: any): BeliefNodeType {
-    const upper = String(value ?? '').toUpperCase();
-    return NODE_TYPES.has(upper as BeliefNodeType)
-      ? (upper as BeliefNodeType)
-      : BeliefNodeType.REQUIREMENT;
-  }
-
-  private toStatus(value: any): BeliefStatus {
-    const upper = String(value ?? '').toUpperCase();
-    // The model must never assert CONFIRMED; downgrade to STATED if it tries.
-    if (upper === BeliefStatus.CONFIRMED) return BeliefStatus.STATED;
-    return STATUSES.has(upper as BeliefStatus) ? (upper as BeliefStatus) : BeliefStatus.INFERRED;
-  }
-
-  private toKind(value: any): string {
-    const kind = this.toText(value).toLowerCase().trim();
-    return KINDS.has(kind) ? kind : 'feature';
-  }
-
-  private toCoverageKey(value: any): string | null {
-    const key = this.toText(value).toLowerCase().trim();
-    return RUBRIC_KEYS.includes(key) ? key : null;
-  }
-
-  private clampConfidence(value: any): number {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return 0.5;
-    // Tolerate a model that returns 0–100 instead of 0–1.
-    const scaled = numeric > 1 ? numeric / 100 : numeric;
-    return Math.max(0, Math.min(1, Math.round(scaled * 100) / 100));
-  }
-
-  /** Build provenance from the model's quote: locate it in the source for a real span. */
-  private toProvenance(quote: any, source: Source): Provenance[] {
-    const quoteText = this.toText(quote).trim();
-    if (!quoteText) return [];
-    const quoteIndex = source.content.indexOf(quoteText);
-    const entry: Provenance = { sourceId: source.id, quote: quoteText };
-    if (quoteIndex >= 0) entry.span = [quoteIndex, quoteIndex + quoteText.length];
-    return [entry];
-  }
-
-  private toText(value: any): string {
-    return typeof value === 'string' ? value : value == null ? '' : String(value);
-  }
-
-  private async recordFailure(
-    rendered: RenderedPrompt,
-    projectId: number,
-    latencyMs: number,
-    error: any,
-  ): Promise<void> {
-    try {
-      await this.prompts.recordOutcome(
-        rendered,
-        { success: false, latencyMs, meta: { error: error?.message ?? String(error) } },
-        { subjectType: 'project', subjectId: projectId },
-      );
-    } catch {
-      // Logging the outcome must never mask the original error.
+    const location = this.graphValidation.locateQuote(quote, source.content);
+    if (location.match === 'none') {
+      return {
+        status: BeliefStatus.ASSUMED,
+        confidence: Math.min(belief.confidence, UNGROUNDED_CONFIDENCE_CAP),
+        provenance: [{ sourceId: source.id, quote, grounded: false, match: 'none' }],
+      };
     }
+
+    const entry: Provenance = { sourceId: source.id, quote, grounded: true, match: location.match };
+    if (location.span) entry.span = location.span;
+    return { status: belief.status as BeliefStatus, confidence: belief.confidence, provenance: [entry] };
   }
 }

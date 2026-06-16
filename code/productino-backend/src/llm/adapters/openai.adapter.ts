@@ -51,6 +51,8 @@ export class OpenAiAdapter extends BaseLlmAdapter {
         tokensIn: data?.usage?.prompt_tokens ?? null,
         tokensOut: data?.usage?.completion_tokens ?? null,
       },
+      // OpenAI-compatible: 'stop' | 'length' | 'content_filter' | 'tool_calls'
+      finishReason: data?.choices?.[0]?.finish_reason ?? null,
     };
   }
 }

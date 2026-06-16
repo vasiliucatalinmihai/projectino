@@ -9,7 +9,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { DefinitionService } from '../../services';
+import { DefinitionService, PipelineLockService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { User } from '../../entities';
 import { CurrentUser, RequirePermissions } from '../decorators';
@@ -22,7 +22,10 @@ import { ProductDefinitionResponse } from '../response/definition';
 @ApiForbiddenResponse({ description: 'Insufficient permission' })
 @Controller('projects/:projectId/definition')
 export class DefinitionController {
-  constructor(private readonly definitions: DefinitionService) {}
+  constructor(
+    private readonly definitions: DefinitionService,
+    private readonly lock: PipelineLockService,
+  ) {}
 
   @Get()
   @RequirePermissions(PermissionKey.VIEW_ONLY)
@@ -55,10 +58,12 @@ export class DefinitionController {
     @Body() body: GenerateDefinitionRequest,
     @CurrentUser() user: User,
   ): Promise<ProductDefinitionResponse> {
-    const d = await this.definitions.generate(projectId, user, {
-      override: body.override,
-      overrideReason: body.overrideReason,
-    });
-    return ProductDefinitionResponse.fromEntity(d);
+    const definition = await this.lock.run(projectId, () =>
+      this.definitions.generate(projectId, user, {
+        override: body.override,
+        overrideReason: body.overrideReason,
+      }),
+    );
+    return ProductDefinitionResponse.fromEntity(definition);
   }
 }
