@@ -1,21 +1,26 @@
-import {
-  BadGatewayException,
-  BadRequestException,
-  Injectable,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { DeliveryLevel, ProjectStage } from '@prisma/client';
-import { PromptKey, RenderedPrompt } from '../common/prompt-key';
+import { PromptKey } from '../common/prompt-key';
 import { DeliveryItem, User } from '../entities';
 import {
   DeliveryItemRepository,
   ProductDefinitionRepository,
   ProjectRepository,
 } from '../repository';
-import { LlmNotConfiguredError, LlmProviderError, LlmRequest, LlmService } from '../llm';
+import {
+  GenerateEpicPlanResult,
+  GenerateEpicPlanSchema,
+  GenerateEpicsResult,
+  GenerateEpicsSchema,
+  StructuredLlmService,
+} from '../llm';
+import { pLimit } from '../common/concurrency';
 import { ProjectService } from './project.service';
-import { PromptManagerService } from './prompt-manager.service';
 import { PipelineResetService } from './pipeline-reset.service';
+
+/** A single task estimated above this many person-days is almost certainly a
+ *  model error (and would distort the proposal price); clamp it to the ceiling. */
+const MAX_TASK_DAYS = 60;
 
 export interface DeliveryNode {
   id: number;
@@ -47,9 +52,9 @@ interface PrdContext {
  * Task with ranged estimates and MVP/later phasing.
  *
  * Generation is split into shallow LLM calls so weaker models nest reliably:
- * one call lists the epics, then one call per epic produces its stories+tasks
- * (only two levels deep, scoped to that epic). The per-epic calls run in
- * parallel. Story/epic/project totals are rolled up from task estimates on read.
+ * one call lists the epics, then one call per epic produces its stories+tasks.
+ * Both outputs are validated/normalized by their schemas (the weak-nesting
+ * rescue lives in GenerateEpicPlanSchema). Per-epic calls run in parallel.
  */
 @Injectable()
 export class DeliveryService {
@@ -58,8 +63,7 @@ export class DeliveryService {
     private readonly projectRepo: ProjectRepository,
     private readonly items: DeliveryItemRepository,
     private readonly definitions: ProductDefinitionRepository,
-    private readonly prompts: PromptManagerService,
-    private readonly llm: LlmService,
+    private readonly structured: StructuredLlmService,
     private readonly reset: PipelineResetService,
   ) {}
 
@@ -85,7 +89,14 @@ export class DeliveryService {
     };
 
     // 1) Epics (flat — one shallow call).
-    const epics = await this.generateEpics(project.id, user.accountId, prd);
+    const { epics } = await this.structured.run({
+      key: PromptKey.GENERATE_EPICS,
+      vars: { summary: prd.summary, inScope: prd.inScope, userStories: prd.userStories },
+      schema: GenerateEpicsSchema,
+      accountId: user.accountId,
+      subject: { type: 'project', id: project.id },
+      scoreOf: (value: GenerateEpicsResult) => value.epics.length,
+    });
     if (!epics.length) {
       throw new UnprocessableEntityException('Model did not return any epics');
     }
@@ -96,23 +107,25 @@ export class DeliveryService {
     }
 
     // Create the epic rows first (so children can reference them).
-    const epicRows: Array<{ row: DeliveryItem; epic: any }> = [];
+    const epicRows: Array<{ row: DeliveryItem; epic: GenerateEpicsResult['epics'][number] }> = [];
     for (let epicIndex = 0; epicIndex < epics.length; epicIndex++) {
       const row = await this.items.create({
         project: { connect: { id: projectId } },
         level: DeliveryLevel.EPIC,
-        title: this.toText(epics[epicIndex]?.title).slice(0, 200) || `Epic ${epicIndex + 1}`,
-        description: this.toText(epics[epicIndex]?.description) || null,
+        title: epics[epicIndex].title.slice(0, 200) || `Epic ${epicIndex + 1}`,
+        description: epics[epicIndex].description || null,
         orderIndex: epicIndex,
       } as any);
       epicRows.push({ row, epic: epics[epicIndex] });
     }
 
-    // 2) Stories + tasks per epic, in parallel. A failed epic plan is skipped,
-    //    not fatal, so one flaky call doesn't lose the whole plan.
+    // 2) Stories + tasks per epic, capped at 3 concurrent so a burst of calls
+    //    doesn't trip provider rate limits. A failed epic plan is skipped, not
+    //    fatal, so one flaky call doesn't lose the whole plan.
+    const limit = pLimit(3);
     await Promise.all(
       epicRows.map(({ row, epic }) =>
-        this.planEpic(project.id, user.accountId, prd, row, epic).catch(() => undefined),
+        limit(() => this.planEpic(project.id, user.accountId, prd, row, epic).catch(() => undefined)),
       ),
     );
 
@@ -127,23 +140,7 @@ export class DeliveryService {
     return this.buildTree(await this.items.findAllForProject(projectId));
   }
 
-  // ── generation steps ────────────────────────────────────────────
-
-  private async generateEpics(
-    projectId: number,
-    accountId: number,
-    prd: PrdContext,
-  ): Promise<any[]> {
-    const parsed = await this.callJson(PromptKey.GENERATE_EPICS, accountId, projectId, {
-      summary: prd.summary,
-      inScope: prd.inScope,
-      userStories: prd.userStories,
-    });
-    const epics = Array.isArray(parsed?.epics) ? parsed.epics : [];
-    return epics.filter(
-      (epic: any) => epic && typeof epic === 'object' && this.toText(epic.title).trim(),
-    );
-  }
+  // ── generation ───────────────────────────────────────────────────
 
   /** Generate one epic's stories+tasks and persist them under the epic row. */
   private async planEpic(
@@ -151,15 +148,22 @@ export class DeliveryService {
     accountId: number,
     prd: PrdContext,
     epicRow: DeliveryItem,
-    epic: any,
+    epic: GenerateEpicsResult['epics'][number],
   ): Promise<void> {
-    const parsed = await this.callJson(PromptKey.GENERATE_EPIC_PLAN, accountId, projectId, {
-      summary: prd.summary,
-      nonFunctional: prd.nonFunctional,
-      epicTitle: this.toText(epic?.title),
-      epicDescription: this.toText(epic?.description),
+    const { stories } = await this.structured.run({
+      key: PromptKey.GENERATE_EPIC_PLAN,
+      vars: {
+        summary: prd.summary,
+        nonFunctional: prd.nonFunctional,
+        epicTitle: epic.title,
+        epicDescription: epic.description,
+      },
+      schema: GenerateEpicPlanSchema,
+      accountId,
+      subject: { type: 'project', id: projectId },
+      scoreOf: (value: GenerateEpicPlanResult) =>
+        value.stories.reduce((sum, story) => sum + story.tasks.length, 0),
     });
-    const stories = this.normalizeStories(parsed);
 
     let storyIndex = 0;
     for (const story of stories) {
@@ -167,109 +171,30 @@ export class DeliveryService {
         project: { connect: { id: projectId } },
         parent: { connect: { id: epicRow.id } },
         level: DeliveryLevel.STORY,
-        title: this.toText(story?.title).slice(0, 200) || `Story ${storyIndex + 1}`,
-        description: this.toText(story?.description) || null,
+        title: story.title.slice(0, 200) || `Story ${storyIndex + 1}`,
+        description: story.description || null,
         orderIndex: storyIndex++,
       } as any);
 
       let taskIndex = 0;
-      for (const task of Array.isArray(story?.tasks) ? story.tasks : []) {
-        const [low, high] = this.estimateRange(task?.estimateLow, task?.estimateHigh);
+      for (const task of story.tasks) {
+        const [low, high] = this.estimateRange(task.estimateLow, task.estimateHigh);
         await this.items.create({
           project: { connect: { id: projectId } },
           parent: { connect: { id: storyRow.id } },
           level: DeliveryLevel.TASK,
-          title: this.toText(task?.title).slice(0, 200) || `Task ${taskIndex + 1}`,
-          description: this.toText(task?.description) || null,
+          title: task.title.slice(0, 200) || `Task ${taskIndex + 1}`,
+          description: task.description || null,
           estimateLow: low,
           estimateHigh: high,
-          phase: this.toPhase(task?.phase),
+          phase: this.toPhase(task.phase),
           orderIndex: taskIndex++,
         } as any);
       }
     }
   }
 
-  /** Render → run → tolerant-parse to an object, recording the prompt outcome. */
-  private async callJson(
-    key: PromptKey,
-    accountId: number,
-    projectId: number,
-    vars: Record<string, any>,
-  ): Promise<Record<string, any>> {
-    const rendered = this.prompts.get(key, vars);
-    const req: LlmRequest = {
-      messages: [{ role: 'user', content: rendered.content }],
-      json: true,
-      maxTokens: rendered.config.maxTokens,
-      temperature: rendered.config.temperature,
-    };
-
-    const startedAt = Date.now();
-    let text: string;
-    let provider: string;
-    let model: string;
-    let tokensIn: number | null;
-    let tokensOut: number | null;
-    try {
-      const result = await this.llm.run(accountId, req);
-      ({ text, provider, model } = result);
-      ({ tokensIn, tokensOut } = result.usage);
-    } catch (error) {
-      await this.recordFailure(rendered, projectId, Date.now() - startedAt, error);
-      if (error instanceof LlmNotConfiguredError)
-        throw new UnprocessableEntityException(error.message);
-      if (error instanceof LlmProviderError) throw new BadGatewayException(error.message);
-      throw error;
-    }
-    const latencyMs = Date.now() - startedAt;
-
-    let parsed: Record<string, any>;
-    try {
-      parsed = this.parseJsonObject(text);
-    } catch (error: any) {
-      await this.recordFailure(rendered, projectId, latencyMs, error);
-      throw new UnprocessableEntityException('Model did not return valid delivery JSON');
-    }
-
-    await this.prompts.recordOutcome(
-      rendered,
-      {
-        success: true,
-        latencyMs,
-        tokensIn: tokensIn ?? undefined,
-        tokensOut: tokensOut ?? undefined,
-        provider,
-        model,
-      },
-      { subjectType: 'project', subjectId: projectId },
-    );
-    return parsed;
-  }
-
   // ── helpers ─────────────────────────────────────────────────────
-
-  /** Coerce a per-epic plan into stories[] with tasks[] (tolerant of weak nesting). */
-  private normalizeStories(parsed: Record<string, any>): any[] {
-    const hasEstimate = (item: any) => item?.estimateLow != null || item?.estimateHigh != null;
-    const asTask = (item: any) => ({
-      title: item?.title,
-      description: item?.description,
-      estimateLow: item?.estimateLow,
-      estimateHigh: item?.estimateHigh,
-      phase: item?.phase,
-    });
-    let stories = Array.isArray(parsed?.stories) ? parsed.stories : [];
-    // Some models return tasks directly with no stories.
-    if (!stories.length && Array.isArray(parsed?.tasks)) {
-      stories = [{ title: 'General', tasks: parsed.tasks }];
-    }
-    return stories.map((story: any) => {
-      let tasks = Array.isArray(story?.tasks) ? story.tasks : [];
-      if (!tasks.length && hasEstimate(story)) tasks = [asTask(story)];
-      return { ...story, tasks };
-    });
-  }
 
   private buildTree(allItems: DeliveryItem[]): DeliveryTree {
     const childrenByParent = new Map<number | null, DeliveryItem[]>();
@@ -317,22 +242,15 @@ export class DeliveryService {
     };
   }
 
-  private estimateRange(lo: any, hi: any): [number | null, number | null] {
-    const lowValue = this.toInt(lo);
-    const highValue = this.toInt(hi);
-    if (lowValue === null && highValue === null) return [null, null];
-    const low = lowValue ?? highValue!;
-    const high = highValue ?? lowValue!;
+  private estimateRange(lo: number | null, hi: number | null): [number | null, number | null] {
+    if (lo === null && hi === null) return [null, null];
+    const low = Math.min(MAX_TASK_DAYS, lo ?? hi!);
+    const high = Math.min(MAX_TASK_DAYS, hi ?? lo!);
     return [Math.min(low, high), Math.max(low, high)];
   }
 
-  private toInt(value: any): number | null {
-    const num = Number(value);
-    return Number.isFinite(num) ? Math.max(0, Math.round(num)) : null;
-  }
-
-  private toPhase(value: any): string | null {
-    const text = this.toText(value).trim();
+  private toPhase(value: string): string | null {
+    const text = (value ?? '').trim();
     return text ? text.slice(0, 40) : null;
   }
 
@@ -352,37 +270,7 @@ export class DeliveryService {
       .join('\n');
   }
 
-  private parseJsonObject(text: string): Record<string, any> {
-    let trimmed = (text ?? '').trim();
-    if (trimmed.startsWith('```')) {
-      trimmed = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-    }
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-    if (start === -1 || end === -1 || end < start) throw new Error('no JSON object in output');
-    const parsed = JSON.parse(trimmed.slice(start, end + 1));
-    if (!parsed || typeof parsed !== 'object') throw new Error('not an object');
-    return parsed;
-  }
-
   private toText(value: any): string {
     return typeof value === 'string' ? value : value == null ? '' : String(value);
-  }
-
-  private async recordFailure(
-    rendered: RenderedPrompt,
-    projectId: number,
-    latencyMs: number,
-    error: any,
-  ): Promise<void> {
-    try {
-      await this.prompts.recordOutcome(
-        rendered,
-        { success: false, latencyMs, meta: { error: error?.message ?? String(error) } },
-        { subjectType: 'project', subjectId: projectId },
-      );
-    } catch {
-      // never mask the original error
-    }
   }
 }

@@ -15,6 +15,7 @@ import {
   ConflictService,
   CoverageService,
   ExtractionService,
+  PipelineLockService,
   PipelineResetService,
 } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
@@ -38,7 +39,20 @@ export class ProjectGraphController {
     private readonly answers: AnswerService,
     private readonly conflicts: ConflictService,
     private readonly reset: PipelineResetService,
+    private readonly lock: PipelineLockService,
   ) {}
+
+  /** Run a mutation under the per-project lock, then return the refreshed graph. */
+  private async mutate(
+    projectId: number,
+    user: User,
+    fn: () => Promise<unknown>,
+  ): Promise<BeliefGraphResponse> {
+    return this.lock.run(projectId, async () => {
+      await fn();
+      return BeliefGraphResponse.build(await this.graph.forProject(projectId, user));
+    });
+  }
 
   @Get('graph')
   @RequirePermissions(PermissionKey.VIEW_ONLY)
@@ -72,8 +86,7 @@ export class ProjectGraphController {
     @Body() body: ExtractRequest,
     @CurrentUser() user: User,
   ): Promise<BeliefGraphResponse> {
-    await this.extraction.run(projectId, user, body?.sourceId);
-    return BeliefGraphResponse.build(await this.graph.forProject(projectId, user));
+    return this.mutate(projectId, user, () => this.extraction.run(projectId, user, body?.sourceId));
   }
 
   @Post('score')
@@ -91,8 +104,7 @@ export class ProjectGraphController {
     @Param('projectId', ParseIntPipe) projectId: number,
     @CurrentUser() user: User,
   ): Promise<BeliefGraphResponse> {
-    await this.coverage.run(projectId, user);
-    return BeliefGraphResponse.build(await this.graph.forProject(projectId, user));
+    return this.mutate(projectId, user, () => this.coverage.run(projectId, user));
   }
 
   @Post('answers')
@@ -111,8 +123,7 @@ export class ProjectGraphController {
     @Body() body: IngestAnswersRequest,
     @CurrentUser() user: User,
   ): Promise<BeliefGraphResponse> {
-    await this.answers.ingest(projectId, user, body.answers);
-    return BeliefGraphResponse.build(await this.graph.forProject(projectId, user));
+    return this.mutate(projectId, user, () => this.answers.ingest(projectId, user, body.answers));
   }
 
   @Post('conflicts')
@@ -127,8 +138,7 @@ export class ProjectGraphController {
     @Param('projectId', ParseIntPipe) projectId: number,
     @CurrentUser() user: User,
   ): Promise<BeliefGraphResponse> {
-    await this.conflicts.detect(projectId, user);
-    return BeliefGraphResponse.build(await this.graph.forProject(projectId, user));
+    return this.mutate(projectId, user, () => this.conflicts.detect(projectId, user));
   }
 
   @Post('reset')
@@ -147,8 +157,7 @@ export class ProjectGraphController {
     @Body() body: ResetRequest,
     @CurrentUser() user: User,
   ): Promise<BeliefGraphResponse> {
-    await this.reset.resetFrom(projectId, user, body.from);
-    return BeliefGraphResponse.build(await this.graph.forProject(projectId, user));
+    return this.mutate(projectId, user, () => this.reset.resetFrom(projectId, user, body.from));
   }
 
   @Patch('conflicts/:conflictId')

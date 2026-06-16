@@ -3,6 +3,7 @@ import { AccountRepository, AiModelRepository } from '../repository';
 import {
   AnthropicAdapter,
   DeepSeekAdapter,
+  GeminiAdapter,
   OpenAiAdapter,
   QwenAdapter,
 } from './adapters';
@@ -25,6 +26,7 @@ import { LlmService } from './llm.service';
     OpenAiAdapter,
     DeepSeekAdapter,
     QwenAdapter,
+    GeminiAdapter,
     LlmConfigResolverService,
     LlmService,
   ],

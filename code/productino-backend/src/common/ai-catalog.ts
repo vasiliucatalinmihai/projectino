@@ -16,4 +16,5 @@ export const DEFAULT_MODEL_CATALOG: ModelCatalog = {
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini'],
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
   qwen: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen2.5-72b-instruct'],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'],
 };

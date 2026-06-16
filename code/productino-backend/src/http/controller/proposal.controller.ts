@@ -9,7 +9,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { ProposalService } from '../../services';
+import { PipelineLockService, ProposalService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { User } from '../../entities';
 import { CurrentUser, RequirePermissions } from '../decorators';
@@ -21,7 +21,10 @@ import { ProposalResponse, ProposalDocResponse } from '../response/proposal';
 @ApiForbiddenResponse({ description: 'Insufficient permission' })
 @Controller('projects/:projectId/proposal')
 export class ProposalController {
-  constructor(private readonly proposals: ProposalService) {}
+  constructor(
+    private readonly proposals: ProposalService,
+    private readonly lock: PipelineLockService,
+  ) {}
 
   @Get()
   @RequirePermissions(PermissionKey.VIEW_ONLY)
@@ -60,6 +63,8 @@ export class ProposalController {
     @Param('projectId', ParseIntPipe) projectId: number,
     @CurrentUser() user: User,
   ): Promise<ProposalResponse> {
-    return ProposalResponse.fromEntity(await this.proposals.generate(projectId, user));
+    return ProposalResponse.fromEntity(
+      await this.lock.run(projectId, () => this.proposals.generate(projectId, user)),
+    );
   }
 }

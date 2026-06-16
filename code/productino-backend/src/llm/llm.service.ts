@@ -10,6 +10,7 @@ import { LlmConfigResolverService } from './llm-config-resolver.service';
 import {
   AnthropicAdapter,
   DeepSeekAdapter,
+  GeminiAdapter,
   LlmProviderAdapter,
   OpenAiAdapter,
   QwenAdapter,
@@ -36,8 +37,9 @@ export class LlmService implements PromptRunner {
     openai: OpenAiAdapter,
     deepseek: DeepSeekAdapter,
     qwen: QwenAdapter,
+    gemini: GeminiAdapter,
   ) {
-    for (const adapter of [anthropic, openai, deepseek, qwen]) {
+    for (const adapter of [anthropic, openai, deepseek, qwen, gemini]) {
       for (const provider of adapter.providers) {
         this.adapters.set(provider.toLowerCase(), adapter);
       }
@@ -67,10 +69,10 @@ export class LlmService implements PromptRunner {
       );
     }
 
-    const { text, usage } = await adapter.generate(config, req);
+    const { text, usage, finishReason } = await adapter.generate(config, req);
     this.logger.debug(
       `source=${config.source} ${config.provider}/${config.model} ` +
-        `in=${usage.tokensIn ?? '?'} out=${usage.tokensOut ?? '?'}`,
+        `in=${usage.tokensIn ?? '?'} out=${usage.tokensOut ?? '?'} stop=${finishReason ?? '?'}`,
     );
 
     return {
@@ -79,6 +81,7 @@ export class LlmService implements PromptRunner {
       model: config.model,
       source: config.source,
       usage,
+      finishReason: finishReason ?? null,
     };
   }
 }

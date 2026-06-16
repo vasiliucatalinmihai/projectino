@@ -1,16 +1,11 @@
-import {
-  BadGatewayException,
-  Injectable,
-  NotFoundException,
-  UnprocessableEntityException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConflictStatus } from '@prisma/client';
-import { PromptKey, RenderedPrompt } from '../common/prompt-key';
+import { PromptKey } from '../common/prompt-key';
 import { BeliefNode, Conflict, User } from '../entities';
 import { BeliefNodeRepository, ConflictRepository, ProjectRoundRepository } from '../repository';
-import { LlmNotConfiguredError, LlmProviderError, LlmRequest, LlmService } from '../llm';
+import { DetectConflictsSchema, StructuredLlmService } from '../llm';
 import { ProjectService } from './project.service';
-import { PromptManagerService } from './prompt-manager.service';
+import { GraphValidationService } from './graph-validation.service';
 
 /**
  * Phase 6: detect contradictions between beliefs and keep them as first-class
@@ -23,8 +18,8 @@ export class ConflictService {
     private readonly nodes: BeliefNodeRepository,
     private readonly conflicts: ConflictRepository,
     private readonly rounds: ProjectRoundRepository,
-    private readonly prompts: PromptManagerService,
-    private readonly llm: LlmService,
+    private readonly structured: StructuredLlmService,
+    private readonly graphValidation: GraphValidationService,
   ) {}
 
   async detect(projectId: number, user: User): Promise<Conflict[]> {
@@ -35,57 +30,55 @@ export class ConflictService {
     await this.conflicts.deleteMany({ projectId });
     if (nodes.length < 2) return [];
 
-    const rendered = this.prompts.get(PromptKey.DETECT_CONFLICTS, {
-      beliefsList: this.beliefsList(nodes),
+    const nodeNames = nodes.map((node) => node.name);
+    const { conflicts } = await this.structured.run({
+      key: PromptKey.DETECT_CONFLICTS,
+      vars: { beliefsList: this.beliefsList(nodes) },
+      schema: DetectConflictsSchema,
+      accountId: user.accountId,
+      subject: { type: 'project', id: project.id },
+      scoreOf: (value) => value.conflicts.length,
+      // Referential integrity: both sides must name a real belief, else the
+      // "conflict" is between things that don't exist. Repair, then drop leftovers.
+      validate: (value) => {
+        const dropped = value.conflicts.filter(
+          (conflict) =>
+            this.graphValidation.resolveBeliefRefs([conflict.beliefA, conflict.beliefB], nodeNames)
+              .unknown.length > 0,
+        ).length;
+        const metrics = { conflicts: value.conflicts.length, droppedConflicts: dropped };
+        if (dropped > 0) {
+          return {
+            ok: false,
+            metrics,
+            repairMessage:
+              `${dropped} conflict(s) reference beliefs not in the list. Reference each side ` +
+              'only by a belief name exactly as written in the BELIEFS list above.',
+          };
+        }
+        return { ok: true, metrics };
+      },
     });
-    const request: LlmRequest = {
-      messages: [{ role: 'user', content: rendered.content }],
-      json: true,
-      maxTokens: rendered.config.maxTokens,
-      temperature: rendered.config.temperature,
-    };
-
-    const startedAt = Date.now();
-    let text: string;
-    let provider: string;
-    let model: string;
-    let tokensIn: number | null;
-    let tokensOut: number | null;
-    try {
-      const response = await this.llm.run(user.accountId, request);
-      ({ text, provider, model } = response);
-      ({ tokensIn, tokensOut } = response.usage);
-    } catch (error) {
-      await this.recordFailure(rendered, project.id, Date.now() - startedAt, error);
-      if (error instanceof LlmNotConfiguredError) throw new UnprocessableEntityException(error.message);
-      if (error instanceof LlmProviderError) throw new BadGatewayException(error.message);
-      throw error;
-    }
-    const latencyMs = Date.now() - startedAt;
-
-    let parsed: any[];
-    try {
-      parsed = this.parse(text);
-    } catch (error: any) {
-      await this.recordFailure(rendered, project.id, latencyMs, error);
-      throw new UnprocessableEntityException('Model did not return valid conflicts JSON');
-    }
 
     const allRounds = await this.rounds.findAllForProject(projectId);
     const round = allRounds.length ? allRounds[allRounds.length - 1].index : 1;
 
     const created: Conflict[] = [];
-    for (const conflict of parsed) {
-      const summary = this.toText(conflict?.summary).trim() || 'Conflict';
-      const detail = this.toText(conflict?.detail).trim();
-      const beliefA = this.toText(conflict?.beliefA).trim();
-      const beliefB = this.toText(conflict?.beliefB).trim();
-      if (!beliefA || !beliefB || !detail) continue;
+    for (const conflict of conflicts) {
+      // Drop conflicts that still reference a non-existent belief; normalize the
+      // surviving ones to the canonical node names.
+      const { resolved, unknown } = this.graphValidation.resolveBeliefRefs(
+        [conflict.beliefA, conflict.beliefB],
+        nodeNames,
+      );
+      if (unknown.length) continue;
+      const beliefA = resolved.get(conflict.beliefA) ?? conflict.beliefA;
+      const beliefB = resolved.get(conflict.beliefB) ?? conflict.beliefB;
       created.push(
         await this.conflicts.create({
           project: { connect: { id: projectId } },
-          summary: summary.slice(0, 200),
-          detail,
+          summary: conflict.summary.slice(0, 200),
+          detail: conflict.detail,
           beliefA: beliefA.slice(0, 300),
           beliefB: beliefB.slice(0, 300),
           status: ConflictStatus.OPEN,
@@ -93,21 +86,6 @@ export class ConflictService {
         } as any),
       );
     }
-
-    await this.prompts.recordOutcome(
-      rendered,
-      {
-        success: true,
-        latencyMs,
-        tokensIn: tokensIn ?? undefined,
-        tokensOut: tokensOut ?? undefined,
-        provider,
-        model,
-        score: created.length,
-      },
-      { subjectType: 'project', subjectId: project.id },
-    );
-
     return created;
   }
 
@@ -126,8 +104,6 @@ export class ConflictService {
     return this.conflicts.update(conflictId, { status } as any);
   }
 
-  // ── helpers ─────────────────────────────────────────────────────
-
   private beliefsList(nodes: BeliefNode[]): string {
     return nodes
       .map(
@@ -136,39 +112,5 @@ export class ConflictService {
           (node.description ? ` — ${node.description}` : ''),
       )
       .join('\n');
-  }
-
-  private parse(text: string): any[] {
-    let trimmed = (text ?? '').trim();
-    if (trimmed.startsWith('```')) {
-      trimmed = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-    }
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-    if (start === -1 || end === -1 || end < start) throw new Error('no JSON object in output');
-    const parsed = JSON.parse(trimmed.slice(start, end + 1));
-    if (!parsed || !Array.isArray(parsed.conflicts)) throw new Error('output missing conflicts[]');
-    return parsed.conflicts.filter((conflict: any) => conflict && typeof conflict === 'object');
-  }
-
-  private toText(value: any): string {
-    return typeof value === 'string' ? value : value == null ? '' : String(value);
-  }
-
-  private async recordFailure(
-    rendered: RenderedPrompt,
-    projectId: number,
-    latencyMs: number,
-    error: any,
-  ): Promise<void> {
-    try {
-      await this.prompts.recordOutcome(
-        rendered,
-        { success: false, latencyMs, meta: { error: error?.message ?? String(error) } },
-        { subjectType: 'project', subjectId: projectId },
-      );
-    } catch {
-      // never mask the original error
-    }
   }
 }

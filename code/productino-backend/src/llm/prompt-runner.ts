@@ -30,6 +30,13 @@ export interface LlmRequest {
    * needing to model every feature.
    */
   options?: Record<string, any>;
+  /**
+   * Provider-agnostic request for strict structured output. When set, capable
+   * adapters force the model to emit JSON matching this JSON Schema (Anthropic
+   * tool-use, OpenAI json_schema, …). Weaker providers ignore it and rely on
+   * JSON mode + the caller's validate/repair loop.
+   */
+  responseSchema?: { name: string; description?: string; schema: Record<string, any> };
 }
 
 export interface LlmUsage {
@@ -46,6 +53,8 @@ export interface LlmResult {
   model: string;
   source: LlmConfigSource;
   usage: LlmUsage;
+  /** Why the model stopped — `length`/`max_tokens` signals a truncated response. */
+  finishReason?: string | null;
 }
 
 /**
@@ -88,8 +97,19 @@ export class LlmNotConfiguredError extends Error {
 
 /** The upstream provider rejected the call or returned an unusable response. */
 export class LlmProviderError extends Error {
-  constructor(message: string) {
+  /** HTTP status from the provider, when the failure was an HTTP response. */
+  readonly status?: number;
+  /** Seconds to wait before retrying, parsed from a `Retry-After` header. */
+  readonly retryAfter?: number;
+  /** Transient failures (429 / 5xx / network) are safe to retry with backoff. */
+  readonly retryable: boolean;
+
+  constructor(message: string, opts: { status?: number; retryAfter?: number; retryable?: boolean } = {}) {
     super(message);
     this.name = 'LlmProviderError';
+    this.status = opts.status;
+    this.retryAfter = opts.retryAfter;
+    this.retryable =
+      opts.retryable ?? (opts.status === 429 || (opts.status !== undefined && opts.status >= 500));
   }
 }

@@ -6,10 +6,9 @@ import {
   ProposalRepository,
   SettingRepository,
 } from '../repository';
-import { LlmRequest, LlmService } from '../llm';
+import { StructuredLlmService, SynthesizeProposalSchema } from '../llm';
 import { ProjectService } from './project.service';
 import { DeliveryService, DeliveryNode } from './delivery.service';
-import { PromptManagerService } from './prompt-manager.service';
 
 const PHASE_ORDER: Record<string, number> = { MVP: 0, 'PHASE 2': 1, LATER: 2 };
 
@@ -26,8 +25,7 @@ export class ProposalService {
     private readonly definitions: ProductDefinitionRepository,
     private readonly proposals: ProposalRepository,
     private readonly settings: SettingRepository,
-    private readonly prompts: PromptManagerService,
-    private readonly llm: LlmService,
+    private readonly structured: StructuredLlmService,
   ) {}
 
   async latest(projectId: number, user: User): Promise<Proposal | null> {
@@ -172,58 +170,25 @@ export class ProposalService {
     project: { name: string; client?: { name?: string } },
     summary: string,
     phases: ProposalPhase[],
-  ): Promise<{ intro: string; closing: string; phases: any[] }> {
+  ): Promise<{ intro?: string; closing?: string; phases?: Array<{ name?: string; narrative?: string }> }> {
     const phasesList = phases
       .map((phase) => `${phase.name} — scope: ${phase.scope.join('; ') || '(general)'}`)
       .join('\n');
-    const rendered = this.prompts.get(PromptKey.SYNTHESIZE_PROPOSAL, {
-      projectName: project.name,
-      clientName: project.client?.name ?? 'the client',
-      summary,
-      phasesList,
-    });
-    const req: LlmRequest = {
-      messages: [{ role: 'user', content: rendered.content }],
-      json: true,
-      maxTokens: rendered.config.maxTokens,
-      temperature: rendered.config.temperature,
-    };
-    const startedAt = Date.now();
     try {
-      const result = await this.llm.run((project as any).accountId, req);
-      const parsed = this.parseJsonObject(result.text);
-      await this.prompts.recordOutcome(
-        rendered,
-        {
-          success: true,
-          latencyMs: Date.now() - startedAt,
-          tokensIn: result.usage.tokensIn ?? undefined,
-          tokensOut: result.usage.tokensOut ?? undefined,
-          provider: result.provider,
-          model: result.model,
+      // Prose is optional — a failed/invalid generation still yields a fully-priced proposal.
+      return await this.structured.run({
+        key: PromptKey.SYNTHESIZE_PROPOSAL,
+        vars: {
+          projectName: project.name,
+          clientName: project.client?.name ?? 'the client',
+          summary,
+          phasesList,
         },
-        { subjectType: 'project', subjectId: (project as any).id },
-      );
-      return {
-        intro: this.toText(parsed.intro),
-        closing: this.toText(parsed.closing),
-        phases: Array.isArray(parsed.phases) ? parsed.phases : [],
-      };
-    } catch (error: any) {
-      // Prose is optional — a failed call still yields a fully-priced proposal.
-      try {
-        await this.prompts.recordOutcome(
-          rendered,
-          {
-            success: false,
-            latencyMs: Date.now() - startedAt,
-            meta: { error: error?.message ?? String(error) },
-          },
-          { subjectType: 'project', subjectId: (project as any).id },
-        );
-      } catch {
-        /* ignore */
-      }
+        schema: SynthesizeProposalSchema,
+        accountId: (project as any).accountId,
+        subject: { type: 'project', id: (project as any).id },
+      });
+    } catch {
       return { intro: '', closing: '', phases: [] };
     }
   }
@@ -246,16 +211,5 @@ export class ProposalService {
 
   private toText(value: any): string {
     return typeof value === 'string' ? value : value == null ? '' : String(value);
-  }
-
-  private parseJsonObject(text: string): Record<string, any> {
-    let trimmed = (text ?? '').trim();
-    if (trimmed.startsWith('```')) {
-      trimmed = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-    }
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-    if (start === -1 || end === -1 || end < start) throw new Error('no JSON object in output');
-    return JSON.parse(trimmed.slice(start, end + 1));
   }
 }

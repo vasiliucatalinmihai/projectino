@@ -4,7 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
 
 import { PrismaModule } from './prisma.module';
-import { LlmModule } from './llm';
+import { LlmModule, StructuredLlmService } from './llm';
 
 // Controllers — add new ones here
 import { AuthController } from './http/controller/auth.controller';
@@ -42,6 +42,8 @@ import {
   DeliveryService,
   ProposalService,
   PipelineResetService,
+  PipelineLockService,
+  GraphValidationService,
   DashboardService,
   SettingService,
   PromptManagerService,
@@ -143,10 +145,14 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
     DeliveryService,
     ProposalService,
     PipelineResetService,
+    PipelineLockService,
+    GraphValidationService,
     DashboardService,
     SettingService,
     PromptManagerService,
     PromptService,
+    // structured LLM runner (validate + repair) used by the pipeline services
+    StructuredLlmService,
     // global authorization guard (reads @RequirePermissions metadata)
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
