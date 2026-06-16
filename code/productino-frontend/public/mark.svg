@@ -1,0 +1,14 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="productino mark">
+  <rect width="64" height="64" rx="14" fill="#0d0d0d"/>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.25" fill="none" stroke="#2a2a2a" stroke-width="1.5"/>
+  <!-- bit grid: green on the anti-diagonal (bottom-left → top-right) -->
+  <rect x="16" y="16" width="10" height="10" rx="2" fill="#2f2f2f"/>
+  <rect x="27" y="16" width="10" height="10" rx="2" fill="#2f2f2f"/>
+  <rect x="38" y="16" width="10" height="10" rx="2" fill="#4ade80"/>
+  <rect x="16" y="27" width="10" height="10" rx="2" fill="#2f2f2f"/>
+  <rect x="27" y="27" width="10" height="10" rx="2" fill="#4ade80"/>
+  <rect x="38" y="27" width="10" height="10" rx="2" fill="#2f2f2f"/>
+  <rect x="16" y="38" width="10" height="10" rx="2" fill="#4ade80"/>
+  <rect x="27" y="38" width="10" height="10" rx="2" fill="#2f2f2f"/>
+  <rect x="38" y="38" width="10" height="10" rx="2" fill="#2f2f2f"/>
+</svg>

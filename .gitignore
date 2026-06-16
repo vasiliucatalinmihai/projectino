@@ -1,0 +1,8 @@
+data/
+*.log
+.DS_Store
+.env
+.env.local
+.claude
+.idea
+pd.env

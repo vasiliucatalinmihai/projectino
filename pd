@@ -1,0 +1,88 @@
+#!/bin/bash
+
+# productino docker manager — modeled on mind-guard's `mg`
+
+# text decorations
+RCol='\e[0m'
+Red='\e[0;31m';  BRed='\e[1;31m';
+Gre='\e[0;32m';  BGre='\e[1;32m';  BIGre='\e[1;92m';
+Yel='\e[0;33m';  BYel='\e[1;33m';
+Whi='\e[0;37m';  BIWhi='\e[1;97m';
+On_Gre='\e[42m';
+
+SED=`which sed`
+GREP=`which grep`
+XARGS=`which xargs`
+
+if ! command -v docker &>/dev/null; then
+    echo -e "${BRed}Error: Docker is not installed or not available in the PATH.${RCol}"
+    exit 1
+fi
+DOCKER=$(command -v docker)
+
+# Prefer the `docker compose` plugin, fall back to the legacy `docker-compose`
+if docker compose version &>/dev/null; then
+    DOCKER_COMPOSE="docker compose"
+    echo -e "-> ${Yel}Run using docker compose plugin${RCol}"
+elif [ -x "$(command -v docker-compose)" ]; then
+    DOCKER_COMPOSE="docker-compose"
+    echo -e "-> ${Yel}Run using docker-compose script${RCol}"
+else
+    echo -e "${BRed}Error: Docker Compose is not installed or not available in the PATH.${RCol}"
+    exit 1
+fi
+
+# First arg is the action, the rest are parameters
+action=$1
+if [ "$#" -gt "1" ]; then
+    shift
+    parameters=$@
+fi
+
+# Switch into the project directory (where this script lives)
+SCRIPTNAME=`basename $0`
+SCRIPTPATH="$(pwd -P)/$SCRIPTNAME"
+PROJECTPATH=$(dirname "$SCRIPTPATH")
+cd "${PROJECTPATH}"
+
+SUPPORTED_CONTAINERS=(nginx backend frontend postgres)
+DOCKER_COMPOSE_FILE=""
+if [ -f "./pd.env" ]; then
+  source "./pd.env"
+fi
+
+source "./pd_docker_handler.sh"
+
+echo -e "-> ${BIWhi}${On_Gre}Docker compose file: ${DOCKER_COMPOSE_FILE:-docker-compose.yml}      ${RCol}"
+
+case "$action" in
+    build)   DOCKER_HANDLER_build   ${parameters}; exit $? ;;
+    start)   DOCKER_HANDLER_start   ${parameters}; exit $? ;;
+    stop)    DOCKER_HANDLER_stop    ${parameters} ;;
+    restart) DOCKER_HANDLER_restart ${parameters} ;;
+    enter)   DOCKER_HANDLER_enter   ${parameters} ;;
+    logs)    DOCKER_HANDLER_logs    ${parameters} ;;
+    status)  DOCKER_HANDLER_status ;;
+    stats)   DOCKER_HANDLER_stats ;;
+    exec)    DOCKER_HANDLER_execute ${parameters}; exit $? ;;
+    clean-volumes) DOCKER_HANDLER_cleanVolumes ${parameters} ;;
+    *)
+  echo "usage : $0 build|start|stop|restart|enter|logs|status|stats|exec|clean-volumes [container]
+
+  build            Docker build one or all services
+  start            Start the docker containers (rebuilds nothing; deps install on first run)
+  stop             Stop all docker containers
+  restart          Restart one container or all
+  status           Print the status of all containers
+  stats            Live resource usage of all containers
+  enter            Open a bash shell inside a container.  e.g. ./pd enter backend
+  logs             Tail one or all container logs.         e.g. ./pd logs backend  |  ./pd logs all
+  exec             Run a command inside a container.       e.g. ./pd exec backend yarn prisma studio
+  clean-volumes    Remove docker volumes used by a container
+
+  Containers: ${SUPPORTED_CONTAINERS[*]}
+"
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,72 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: productino-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.staging.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/certs:/etc/nginx/certs:ro
+      - ./docker/nginx/acme:/var/www/acme:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./code/productino-backend
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: staging
+    container_name: productino-backend
+    command: sh -c "yarn build && yarn prisma:deploy && yarn start:prod"
+    expose:
+      - "8080"
+    env_file:
+      - ./code/productino-backend/.env.staging
+    depends_on:
+      - postgres
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./code/productino-frontend
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: staging
+    container_name: productino-frontend
+    command: sh -c "yarn build && node .output/server/index.mjs"
+    expose:
+      - "3000"
+    env_file:
+      - ./code/productino-frontend/.env.staging
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: productino-postgres
+    expose:
+      - "5432"
+    environment:
+      - POSTGRES_USER=productino
+      - POSTGRES_PASSWORD=secret
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
