@@ -219,20 +219,21 @@ const faqs = [
     <section class="relative overflow-hidden">
       <div class="hero-grid" aria-hidden="true" />
       <div class="hero-glow" aria-hidden="true" />
-      <div class="relative mx-auto grid max-w-6xl items-center gap-12 px-6 pb-14 pt-12 lg:grid-cols-[1.05fr_1fr] lg:pt-20">
-        <!-- left: the thesis -->
+      <div class="relative mx-auto max-w-3xl px-6 pb-10 pt-12 text-center lg:pt-20">
         <div class="reveal">
           <div class="kicker">// ai-assisted discovery-to-delivery</div>
-          <h1 class="mt-4 text-[2.5rem] font-extrabold leading-[1.04] tracking-tight text-white sm:text-[3.5rem]">
-            From a vague brief to a
-            <span class="accent">scoped, costed</span> plan.
+          <h1 class="mx-auto mt-5 max-w-2xl text-[2.5rem] font-extrabold leading-[1.02] tracking-tight sm:text-[3.5rem]">
+            <span class="block text-neutral-500">From a vague brief</span>
+            <span class="block text-white">
+              to a <span class="accent">scoped, costed</span> plan
+            </span>
           </h1>
-          <p class="mt-5 max-w-xl text-base leading-relaxed text-neutral-400 sm:text-lg">
+          <p class="mx-auto mt-6 max-w-xl text-base leading-relaxed text-neutral-400 sm:text-lg">
             Productino is the discovery engine for software outsourcing teams. It reads the client
             briefing, finds what’s missing, asks the right questions — then turns the answers into
             a definition, a roadmap and a priced proposal.
           </p>
-          <div class="mt-7 flex flex-wrap items-center gap-3">
+          <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
             <NuxtLink to="/login" class="btn-primary px-5 py-2.5 text-base">Sign in</NuxtLink>
             <a href="#how" class="btn-ghost px-5 py-2.5 text-base">See how it works</a>
           </div>
@@ -240,36 +241,12 @@ const faqs = [
             provenance on every claim · bring your own model · no vector DB
           </p>
         </div>
-
-        <!-- right: a discovery run, as a terminal (the signature) -->
-        <div class="terminal reveal reveal-late" aria-hidden="true">
-          <div class="term-bar">
-            <span class="term-dot" style="background: #ff5f56" />
-            <span class="term-dot" style="background: #ffbd2e" />
-            <span class="term-dot" style="background: #27c93f" />
-            <span class="term-title">productino — discovery</span>
-          </div>
-          <div class="term-body">
-            <p class="term-line"><span class="term-prompt">$</span> productino read ./acme-briefing.md</p>
-            <p class="term-out">→ 24 beliefs · <span class="text-amber-300">6 inferred</span> · 3 assumed</p>
-            <p class="term-line term-gap"><span class="term-prompt">$</span> productino score &amp; ask → converge</p>
-            <div class="term-cov-row">
-              <span class="term-cov-label">coverage</span>
-              <span class="term-track"><span class="term-fill" /></span>
-              <span class="term-cov-pct">76%</span>
-            </div>
-            <p class="term-out">gate 70% — <span class="text-brand">cleared ✓</span> · 3 rounds</p>
-            <p class="term-line term-gap"><span class="term-prompt">$</span> productino define · plan · price</p>
-            <p class="term-out">PRD v2 · 6 epics · proposal €16.8k–24.6k</p>
-            <p class="term-line term-gap"><span class="term-prompt">$</span> <span class="cursor" /></p>
-          </div>
-        </div>
       </div>
 
-      <!-- animated product flow -->
-      <div class="relative border-t border-neutral-900 bg-neutral-950/60 px-6 py-8">
+      <!-- animated product flow — the hero's payoff: the loop the headline promises -->
+      <div class="relative px-6 pb-12 pt-2">
         <div class="mx-auto max-w-5xl">
-          <div class="mb-4 text-center"><span class="kicker">// the pipeline</span></div>
+          <div class="mb-4 text-center"><span class="kicker">// brief → definition → proposal</span></div>
           <div class="flow flex flex-wrap items-center justify-center gap-y-3">
             <template v-for="(step, i) in flow" :key="step.key">
               <div class="flow-step" :class="{ loop: step.key === 'answers' || step.key === 'score' }" :style="{ '--i': i }">
@@ -506,7 +483,7 @@ const faqs = [
   position: absolute;
   inset: -25% 0 auto 0;
   height: 520px;
-  background: radial-gradient(55% 55% at 70% 0%, rgba(74, 222, 128, 0.14), transparent 70%);
+  background: radial-gradient(50% 55% at 50% 0%, rgba(74, 222, 128, 0.14), transparent 70%);
   pointer-events: none;
 }
 .hero-grid {
@@ -517,8 +494,8 @@ const faqs = [
     linear-gradient(rgba(74, 222, 128, 0.05) 1px, transparent 1px),
     linear-gradient(90deg, rgba(74, 222, 128, 0.05) 1px, transparent 1px);
   background-size: 44px 44px;
-  -webkit-mask-image: radial-gradient(70% 60% at 60% 10%, #000 0%, transparent 75%);
-  mask-image: radial-gradient(70% 60% at 60% 10%, #000 0%, transparent 75%);
+  -webkit-mask-image: radial-gradient(75% 65% at 50% 8%, #000 0%, transparent 75%);
+  mask-image: radial-gradient(75% 65% at 50% 8%, #000 0%, transparent 75%);
 }
 
 /* headline accent — underlined in brand, not just colored */
@@ -527,118 +504,9 @@ const faqs = [
   box-shadow: inset 0 -0.12em 0 rgba(74, 222, 128, 0.22);
 }
 
-/* terminal window — the signature element */
-.terminal {
-  border: 1px solid #1c1c1c;
-  border-radius: 0.9rem;
-  background: linear-gradient(180deg, #0d0d0d, #0a0a0a);
-  box-shadow: 0 30px 60px -25px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(74, 222, 128, 0.04);
-  overflow: hidden;
-}
-.term-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  border-bottom: 1px solid #1c1c1c;
-  background: #111;
-  padding: 0.6rem 0.9rem;
-}
-.term-dot {
-  height: 0.6rem;
-  width: 0.6rem;
-  border-radius: 9999px;
-  opacity: 0.85;
-}
-.term-title {
-  margin-left: 0.4rem;
-  font-family: theme('fontFamily.mono');
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  color: #6b6b6b;
-}
-.term-body {
-  padding: 1.1rem 1.15rem 1.25rem;
-  font-family: theme('fontFamily.mono');
-  font-size: 0.82rem;
-  line-height: 1.5;
-}
-.term-line {
-  color: #d4d4d4;
-}
-.term-gap {
-  margin-top: 0.7rem;
-}
-.term-prompt {
-  color: #4ade80;
-  margin-right: 0.45rem;
-}
-.term-out {
-  color: #6b6b6b;
-  padding-left: 1.1rem;
-}
-.term-cov-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding-left: 1.1rem;
-  margin-top: 0.4rem;
-}
-.term-cov-label {
-  color: #a3a3a3;
-  font-size: 0.72rem;
-}
-.term-track {
-  position: relative;
-  height: 0.5rem;
-  flex: 1;
-  border-radius: 9999px;
-  background: #1c1c1c;
-  overflow: hidden;
-}
-.term-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 9999px;
-  background: linear-gradient(90deg, #22c55e, #4ade80);
-  width: 76%;
-  animation: converge 4.5s cubic-bezier(0.4, 0, 0.2, 1) 0.4s 1 both;
-}
-.term-cov-pct {
-  width: 2.4rem;
-  text-align: right;
-  color: #4ade80;
-  font-size: 0.75rem;
-}
-.cursor {
-  display: inline-block;
-  width: 0.55rem;
-  height: 1.05em;
-  vertical-align: text-bottom;
-  background: #4ade80;
-  animation: blink 1.1s step-end infinite;
-}
-
-/* climbs in the same steps the product converges through: 31 → 58 → 76 */
-@keyframes converge {
-  0% { width: 0%; }
-  22% { width: 31%; }
-  44% { width: 31%; }
-  60% { width: 58%; }
-  80% { width: 58%; }
-  94% { width: 76%; }
-  100% { width: 76%; }
-}
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
 /* gentle load reveal */
 .reveal {
   animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-.reveal-late {
-  animation-delay: 0.12s;
 }
 @keyframes rise {
   from { opacity: 0; transform: translateY(14px); }
@@ -732,8 +600,6 @@ const faqs = [
   .flow-step,
   .flow-glyph,
   .flow-conn,
-  .term-fill,
-  .cursor,
   .reveal {
     animation: none;
   }
