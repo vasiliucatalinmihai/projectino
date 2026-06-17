@@ -3,6 +3,12 @@ import { LlmRequest, ResolvedLlmConfig } from '../prompt-runner';
 import { AdapterResult, BaseLlmAdapter } from './llm-provider.adapter';
 
 /**
+ * Anthropic deprecated the `temperature` parameter on its 4.x-generation models
+ * — sending it returns a 400. Matches claude-opus-4-x / sonnet-4-x / haiku-4-x.
+ */
+const TEMPERATURE_DEPRECATED = /claude-(opus|sonnet|haiku)-4|claude-4/i;
+
+/**
  * Anthropic Messages API adapter (`POST /v1/messages`).
  *
  * Zero-dependency over `fetch`. Two upgrades over plain text generation:
@@ -60,7 +66,10 @@ export class AnthropicAdapter extends BaseLlmAdapter {
       delete body.system;
     }
 
-    if (req.temperature !== undefined) body.temperature = req.temperature;
+    // Skip `temperature` on models that deprecated it (they 400 if it's present).
+    if (req.temperature !== undefined && !TEMPERATURE_DEPRECATED.test(config.model)) {
+      body.temperature = req.temperature;
+    }
 
     const data = await this.postJson(
       `${base}/v1/messages`,

@@ -8,6 +8,8 @@ import {
   ProjectRepository,
 } from '../repository';
 import {
+  EstimateEpicResult,
+  EstimateEpicSchema,
   GenerateEpicPlanResult,
   GenerateEpicPlanSchema,
   GenerateEpicsResult,
@@ -51,10 +53,13 @@ interface PrdContext {
  * Phase 7 — the delivery layer. Decompose the latest PRD into Epic → Story →
  * Task with ranged estimates and MVP/later phasing.
  *
- * Generation is split into shallow LLM calls so weaker models nest reliably:
- * one call lists the epics, then one call per epic produces its stories+tasks.
- * Both outputs are validated/normalized by their schemas (the weak-nesting
- * rescue lives in GenerateEpicPlanSchema). Per-epic calls run in parallel.
+ * Generation is split into shallow LLM calls so weaker models nest reliably and
+ * so estimation is its own focused step: one call lists the epics, then per epic
+ * one call produces its stories+tasks (no numbers) and a second call sizes all of
+ * that epic's tasks together — seeing the whole task set lets the model size them
+ * relative to one another instead of pricing each task as it's invented. All
+ * outputs are validated/normalized by their schemas (the weak-nesting rescue
+ * lives in GenerateEpicPlanSchema). Per-epic work runs in parallel.
  */
 @Injectable()
 export class DeliveryService {
@@ -142,7 +147,10 @@ export class DeliveryService {
 
   // ── generation ───────────────────────────────────────────────────
 
-  /** Generate one epic's stories+tasks and persist them under the epic row. */
+  /**
+   * Generate one epic's stories+tasks (decomposition), then estimate all of its
+   * tasks in a second call, then persist the tree under the epic row.
+   */
   private async planEpic(
     projectId: number,
     accountId: number,
@@ -150,6 +158,7 @@ export class DeliveryService {
     epicRow: DeliveryItem,
     epic: GenerateEpicsResult['epics'][number],
   ): Promise<void> {
+    // 1) Decompose into stories + tasks (no numbers).
     const { stories } = await this.structured.run({
       key: PromptKey.GENERATE_EPIC_PLAN,
       vars: {
@@ -165,7 +174,25 @@ export class DeliveryService {
         value.stories.reduce((sum, story) => sum + story.tasks.length, 0),
     });
 
+    // Flatten the tasks into one indexed list (1-based) so a single estimate
+    // call can size the whole epic at once and we can map the numbers back.
+    const flat: Array<{ index: number; storyTitle: string; task: GenerateEpicPlanResult['stories'][number]['tasks'][number] }> = [];
+    for (const story of stories) {
+      for (const task of story.tasks) {
+        flat.push({ index: flat.length + 1, storyTitle: story.title, task });
+      }
+    }
+    if (!flat.length) return;
+
+    // 2) Estimate all tasks together. Estimates are a best-effort enrichment —
+    //    if the call fails we still keep the decomposition (tasks land unestimated)
+    //    rather than losing the whole epic.
+    const estimateByIndex = await this.estimateTasks(projectId, accountId, prd, epic, flat);
+
+    // 3) Persist, walking the tasks in the SAME order used to build `flat` so the
+    //    1-based index lines up with the returned estimates.
     let storyIndex = 0;
+    let globalIndex = 0;
     for (const story of stories) {
       const storyRow = await this.items.create({
         project: { connect: { id: projectId } },
@@ -178,7 +205,8 @@ export class DeliveryService {
 
       let taskIndex = 0;
       for (const task of story.tasks) {
-        const [low, high] = this.estimateRange(task.estimateLow, task.estimateHigh);
+        const estimate = estimateByIndex.get(++globalIndex);
+        const [low, high] = this.estimateRange(estimate?.estimateLow ?? null, estimate?.estimateHigh ?? null);
         await this.items.create({
           project: { connect: { id: projectId } },
           parent: { connect: { id: storyRow.id } },
@@ -191,6 +219,47 @@ export class DeliveryService {
           orderIndex: taskIndex++,
         } as any);
       }
+    }
+  }
+
+  /**
+   * Size every task of one epic in a single LLM call. Returns a map from the
+   * 1-based task index to its estimate; empty if the call fails (the caller then
+   * persists the tasks unestimated rather than dropping the epic).
+   */
+  private async estimateTasks(
+    projectId: number,
+    accountId: number,
+    prd: PrdContext,
+    epic: GenerateEpicsResult['epics'][number],
+    flat: Array<{ index: number; storyTitle: string; task: GenerateEpicPlanResult['stories'][number]['tasks'][number] }>,
+  ): Promise<Map<number, EstimateEpicResult['estimates'][number]>> {
+    const taskList = flat
+      .map(({ index, storyTitle, task }) => {
+        const phase = task.phase ? ` (${task.phase})` : '';
+        const story = storyTitle ? `[${storyTitle}] ` : '';
+        return `${index}. ${story}${task.title}${phase}`;
+      })
+      .join('\n');
+
+    try {
+      const { estimates } = await this.structured.run({
+        key: PromptKey.ESTIMATE_EPIC,
+        vars: {
+          summary: prd.summary,
+          nonFunctional: prd.nonFunctional,
+          epicTitle: epic.title,
+          epicDescription: epic.description,
+          tasks: taskList,
+        },
+        schema: EstimateEpicSchema,
+        accountId,
+        subject: { type: 'project', id: projectId },
+        scoreOf: (value: EstimateEpicResult) => value.estimates.length,
+      });
+      return new Map(estimates.map((estimate) => [estimate.index, estimate]));
+    } catch {
+      return new Map();
     }
   }
 

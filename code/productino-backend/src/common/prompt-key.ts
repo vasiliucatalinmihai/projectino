@@ -9,10 +9,13 @@ export enum PromptKey {
   MAP_ANSWERS = 'map-answers',
   SYNTHESIZE_PRD = 'synthesize-prd',
   DETECT_CONFLICTS = 'detect-conflicts',
-  // Delivery planning is split into shallow calls so weaker models nest reliably:
-  // first the epics, then stories+tasks per epic.
+  // Delivery planning is split into shallow calls so weaker models nest reliably,
+  // and so estimation is its own dedicated step: first the epics, then
+  // stories+tasks per epic (no numbers), then one estimate call per epic that
+  // sizes all of that epic's tasks together.
   GENERATE_EPICS = 'generate-epics',
   GENERATE_EPIC_PLAN = 'generate-epic-plan',
+  ESTIMATE_EPIC = 'estimate-epic',
   SYNTHESIZE_PROPOSAL = 'synthesize-proposal',
 }
 

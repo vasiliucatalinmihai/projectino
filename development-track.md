@@ -212,6 +212,8 @@ no extra LLM call) and folds failures into the existing repair loop.
 
 ## Decision log
 
+- **2026-06-17** — Delivery estimates were inflated ~3–5× because `generate-epic-plan` sized configuration work like greenfield custom dev and padded each task — then the proposal's 20% buffer double-counted that padding. Fixed at the **prompt level only** (`prompts/generate-epic-plan.md`): nominal senior-team effort, no per-task contingency (buffer is applied once downstream), and explicit configuration-vs-custom sizing (platform config ≈1–2d; multi-day reserved for genuine custom dev / integrations / migration). No code/schema change. Result on project 12: grand total 415–759d → **193–324d**, MVP 306–558d → **169–283d**, with task **count preserved** (124 vs 152) — i.e. we shrank per-task days, not decomposition. Deliberately NOT done: budget-capacity capping, an estimation-calibration LLM pass, or reducing task count.
+
 - **2026-06-16** — Belief nodes modeled as a single polymorphic `BeliefNode` table (not per-type tables, not fine-grained `Claim`).
 - **2026-06-16** — `GapAnalysis` JSON-blob model retired in favor of normalized Belief Graph tables; its rubric/question logic salvaged into Phase 3 (`SCORE_COVERAGE`).
 - **2026-06-16** — Dev backend command now runs `prisma db push --accept-data-loss` so destructive schema syncs don't crash-loop the container on boot. Prod is unaffected (Dockerfile CMD uses `prisma migrate deploy`).

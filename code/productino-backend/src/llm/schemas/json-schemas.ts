@@ -172,7 +172,7 @@ export const JSON_SCHEMAS: Partial<Record<string, JsonSchemaSpec>> = {
 
   [PromptKey.GENERATE_EPIC_PLAN]: {
     name: 'emit_epic_plan',
-    description: 'Return the stories and estimated tasks for one epic.',
+    description: 'Return the stories and tasks for one epic (no estimates).',
     schema: {
       type: 'object',
       properties: {
@@ -187,13 +187,7 @@ export const JSON_SCHEMAS: Partial<Record<string, JsonSchemaSpec>> = {
                 type: 'array',
                 items: {
                   type: 'object',
-                  properties: {
-                    title: string,
-                    description: string,
-                    estimateLow: { type: 'integer' },
-                    estimateHigh: { type: 'integer' },
-                    phase: string,
-                  },
+                  properties: { title: string, description: string, phase: string },
                   required: ['title'],
                 },
               },
@@ -203,6 +197,29 @@ export const JSON_SCHEMAS: Partial<Record<string, JsonSchemaSpec>> = {
         },
       },
       required: ['stories'],
+    },
+  },
+
+  [PromptKey.ESTIMATE_EPIC]: {
+    name: 'emit_estimates',
+    description: 'Return a ranged day estimate per task, keyed by the given index.',
+    schema: {
+      type: 'object',
+      properties: {
+        estimates: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              index: { type: 'integer' },
+              estimateLow: { type: 'integer' },
+              estimateHigh: { type: 'integer' },
+            },
+            required: ['index', 'estimateLow', 'estimateHigh'],
+          },
+        },
+      },
+      required: ['estimates'],
     },
   },
 

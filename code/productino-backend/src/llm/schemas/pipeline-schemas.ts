@@ -214,14 +214,14 @@ export const GenerateEpicsSchema = z
   .refine((o) => o.epics.length > 0, { message: 'expected at least one epic' });
 export type GenerateEpicsResult = z.infer<typeof GenerateEpicsSchema>;
 
-// ── generate-epic-plan (tolerant of weak nesting) ────────────────────────────────
+// ── generate-epic-plan (decomposition only — no estimates; tolerant of weak nesting) ──
 
-const RawTask = z
-  .object({ title: str, description: str, estimateLow: intOrNull, estimateHigh: intOrNull, phase: str })
-  .loose();
+const RawTask = z.object({ title: str, description: str, phase: str }).loose();
 
 export const GenerateEpicPlanSchema = z
-  .object({ stories: z.unknown(), tasks: z.unknown() })
+  // Both optional: a well-formed reply nests tasks under stories and omits a
+  // top-level `tasks` key (zod v4 treats a bare z.unknown() as a required key).
+  .object({ stories: z.unknown().optional(), tasks: z.unknown().optional() })
   .loose()
   .transform((o) => {
     let stories: any[] = Array.isArray(o.stories) ? o.stories : [];
@@ -229,8 +229,8 @@ export const GenerateEpicPlanSchema = z
     if (!stories.length && Array.isArray(o.tasks)) stories = [{ title: 'General', tasks: o.tasks }];
     const normStories = stories.map((s: any) => {
       let tasks: any[] = Array.isArray(s?.tasks) ? s.tasks : [];
-      // A "story" that carries its own estimate is really a leaf task.
-      if (!tasks.length && (s?.estimateLow != null || s?.estimateHigh != null)) tasks = [s];
+      // A bare "story" with a title but no tasks is really a single leaf task.
+      if (!tasks.length && toText(s?.title).trim()) tasks = [s];
       return {
         title: toText(s?.title),
         description: toText(s?.description),
@@ -244,6 +244,28 @@ export const GenerateEpicPlanSchema = z
     message: 'expected at least one story with tasks',
   });
 export type GenerateEpicPlanResult = z.infer<typeof GenerateEpicPlanSchema>;
+
+// ── estimate-epic (per-task ranges, keyed back by index) ──────────────────────────
+
+export const EstimateEpicSchema = z
+  .object({
+    estimates: arr(
+      z
+        .object({
+          index: z.preprocess((v) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? Math.round(n) : -1;
+          }, z.number()),
+          estimateLow: intOrNull,
+          estimateHigh: intOrNull,
+        })
+        .loose(),
+    ).catch([]),
+  })
+  .transform((o) => ({ estimates: o.estimates.filter((e) => e.index >= 0) }))
+  // Empty usually means a degenerate response — reject so the repair loop retries.
+  .refine((o) => o.estimates.length > 0, { message: 'expected at least one estimate' });
+export type EstimateEpicResult = z.infer<typeof EstimateEpicSchema>;
 
 // ── synthesize-proposal (prose only) ─────────────────────────────────────────────
 
