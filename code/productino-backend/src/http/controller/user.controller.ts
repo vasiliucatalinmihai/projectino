@@ -95,7 +95,7 @@ export class UserController {
   ): Promise<UserResponse> {
     const updated = await this.userService.update(
       id,
-      { name: body.name, permissions: body.permissions, active: body.active },
+      { name: body.name, permissions: body.permissions, active: body.active, accountId: body.accountId },
       user,
     );
     return UserResponse.fromEntity(updated);

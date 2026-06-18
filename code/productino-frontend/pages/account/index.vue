@@ -13,6 +13,7 @@ const { user } = useAuth();
 const canEdit = computed(
   () => !!user.value?.isSuperAdmin || (user.value?.permissions ?? []).includes('ADMIN'),
 );
+const isSuperAdmin = computed(() => !!user.value?.isSuperAdmin);
 
 const { data: account, refresh, error } = await useAsyncData<Account | null>('current-account', () =>
   useApi<Account>('/account').catch(() => null),
@@ -99,6 +100,13 @@ const readOnlyDetails = computed(() => [
       </form>
 
       <DetailList v-else :items="readOnlyDetails" />
+    </div>
+
+    <!-- Users in this account — super-admin management (list / view / edit / delete / move) -->
+    <div v-if="account && isSuperAdmin" class="mt-10">
+      <div class="kicker">// users</div>
+      <h2 class="m-0 mb-3 text-lg font-bold tracking-tight text-white">Users</h2>
+      <UsersManager :account-id="account.id" />
     </div>
   </div>
 </template>

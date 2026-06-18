@@ -109,7 +109,17 @@ const userForm = reactive({
   name: '',
   permissions: [] as string[],
   active: true,
+  accountId: accountId as number,
 });
+
+// All accounts, for the "move user to another account" dropdown.
+interface AccountOption {
+  id: number;
+  name: string;
+}
+const { data: allAccounts } = await useAsyncData<AccountOption[]>('accounts-all', () =>
+  useApi<AccountOption[]>('/accounts').catch(() => []),
+);
 
 function openUserCreate() {
   editingUser.value = null;
@@ -126,6 +136,7 @@ function openUserEdit() {
     name: viewingUser.value.name ?? '',
     permissions: [...viewingUser.value.permissions],
     active: viewingUser.value.active,
+    accountId: viewingUser.value.accountId,
   });
   viewingUser.value = null;
   userError.value = '';
@@ -143,7 +154,12 @@ async function saveUser() {
     if (editingUser.value) {
       await useApi(`/users/${editingUser.value.id}`, {
         method: 'PATCH',
-        body: { name: userForm.name || null, permissions: userForm.permissions, active: userForm.active },
+        body: {
+          name: userForm.name || null,
+          permissions: userForm.permissions,
+          active: userForm.active,
+          accountId: userForm.accountId,
+        },
       });
       showUserForm.value = false;
       await Promise.all([refreshUsers(), refreshAccount()]);
@@ -311,6 +327,13 @@ async function confirmImpersonate() {
           <input v-model="userForm.active" type="checkbox" class="accent-green-500" />
           Active
           <span class="text-xs text-neutral-500">(inactive users cannot log in)</span>
+        </label>
+        <label v-if="editingUser" class="field">
+          Account
+          <select v-model.number="userForm.accountId" class="inp">
+            <option v-for="a in allAccounts ?? []" :key="a.id" :value="a.id">{{ a.name }}</option>
+          </select>
+          <span class="text-xs text-neutral-500">Move this user to another account.</span>
         </label>
         <div class="field">
           Permissions

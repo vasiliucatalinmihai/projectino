@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -7,7 +8,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { PermissionKey } from '../common/permission-key';
 import { User } from '../entities';
-import { UserRepository } from '../repository';
+import { AccountRepository, UserRepository } from '../repository';
 
 // Service-level inputs (no HTTP DTOs).
 export interface CreateUserInput {
@@ -20,6 +21,8 @@ export interface UpdateUserInput {
   name?: string | null;
   permissions?: string[];
   active?: boolean;
+  // Move the user to another account (super admin only).
+  accountId?: number;
 }
 
 /**
@@ -28,7 +31,10 @@ export interface UpdateUserInput {
  */
 @Injectable()
 export class UserService {
-  constructor(private readonly users: UserRepository) {}
+  constructor(
+    private readonly users: UserRepository,
+    private readonly accounts: AccountRepository,
+  ) {}
 
   list(actingUser: User, accountId?: number): Promise<User[]> {
     const scope = actingUser.isSuperAdmin ? accountId ?? null : actingUser.accountId;
@@ -74,6 +80,18 @@ export class UserService {
     if (input.name !== undefined) data.name = input.name;
     if (input.permissions) data.permissions = { set: input.permissions.map((key) => ({ key })) };
     if (input.active !== undefined) data.active = input.active;
+
+    // Moving a user across accounts is a super-admin-only action.
+    if (input.accountId !== undefined && input.accountId !== target.accountId) {
+      if (!actingUser.isSuperAdmin) {
+        throw new ForbiddenException('Only a super admin can move a user to another account');
+      }
+      const destination = await this.accounts.findById(input.accountId);
+      if (!destination) {
+        throw new BadRequestException(`Account ${input.accountId} not found`);
+      }
+      data.account = { connect: { id: input.accountId } };
+    }
 
     await this.users.update(id, data as any);
     return (await this.users.findByIdWithPermissions(id))!;

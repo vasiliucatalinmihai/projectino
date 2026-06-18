@@ -1,7 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateUserRequest {
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Move the user to another account. Super admin only; ignored otherwise.',
+  })
+  @IsOptional()
+  @IsInt()
+  accountId?: number;
+
   @ApiPropertyOptional({ example: 'Renamed User' })
   @IsOptional()
   @IsString()
