@@ -3,8 +3,8 @@ definePageMeta({ layout: false });
 
 const { login } = useAuth();
 
-const email = ref('admin@productino.local');
-const password = ref('admin123');
+const email = ref('');
+const password = ref('');
 const error = ref('');
 const loading = ref(false);
 
@@ -79,9 +79,6 @@ async function onSubmit() {
         <button :disabled="loading" type="submit" class="btn-primary mt-1 w-full">
           {{ loading ? 'Signing in…' : 'Sign in' }}
         </button>
-        <p class="mt-2 text-center font-mono text-[11px] text-neutral-500">
-          admin@productino.local / admin123 · viewer@productino.local / viewer123
-        </p>
       </form>
     </div>
   </div>
