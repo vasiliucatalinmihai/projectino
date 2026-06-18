@@ -64,6 +64,8 @@ export interface LlmResult {
  */
 export interface ResolvedLlmConfig {
   source: LlmConfigSource;
+  /** The AiModel row this resolved to, so callers can attribute usage to it. */
+  modelId: number | null;
   provider: string;
   model: string;
   apiKey: string;

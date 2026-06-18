@@ -44,6 +44,7 @@ export class LlmConfigResolverService {
 
     return {
       source,
+      modelId: model.id,
       provider: model.provider,
       model: model.model,
       // TODO: decrypt here once credentials are stored encrypted at rest.

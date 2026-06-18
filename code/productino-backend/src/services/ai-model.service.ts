@@ -132,6 +132,7 @@ export class AiModelService {
 
     const config: ResolvedLlmConfig = {
       source: 'account',
+      modelId: model.id,
       provider: model.provider,
       model: model.model,
       apiKey: model.apiKey,

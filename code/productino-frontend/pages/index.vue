@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Public marketing landing page — reachable without auth (see middleware/auth.global.ts).
-// Logged-in visitors are sent straight to the app.
+// Logged-in visitors can view it too; the post-login jump to /projects lives in
+// login.vue, so the homepage stays reachable once signed in.
 definePageMeta({ layout: false });
 
-const token = useCookie<string | null>('productino_token');
-if (token.value) {
-  await navigateTo('/projects', { replace: true });
-}
+// Signed-in visitors get a "go to the app" CTA instead of "Sign in".
+const loggedIn = computed(() => !!useCookie<string | null>('productino_token').value);
+const ctaTo = computed(() => (loggedIn.value ? '/projects' : '/login'));
+const ctaLabel = computed(() => (loggedIn.value ? 'Go to projects' : 'Sign in'));
 
 // The pipeline, as an animated flow. The loop back from "Answers" to "Score" is
 // the product's heart — confidence converges round after round.
@@ -212,7 +213,7 @@ const faqs = [
           productino<span class="text-brand">.</span>
         </span>
       </div>
-      <NuxtLink to="/login" class="btn-ghost text-sm">Sign in</NuxtLink>
+      <NuxtLink :to="ctaTo" class="btn-ghost text-sm">{{ ctaLabel }}</NuxtLink>
     </header>
 
     <!-- hero -->
@@ -234,7 +235,7 @@ const faqs = [
             a definition, a roadmap and a priced proposal.
           </p>
           <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <NuxtLink to="/login" class="btn-primary px-5 py-2.5 text-base">Sign in</NuxtLink>
+            <NuxtLink :to="ctaTo" class="btn-primary px-5 py-2.5 text-base">{{ ctaLabel }}</NuxtLink>
             <a href="#how" class="btn-ghost px-5 py-2.5 text-base">See how it works</a>
           </div>
           <p class="mt-6 font-mono text-[11px] text-neutral-600">
@@ -464,7 +465,7 @@ const faqs = [
           have an account.
         </p>
         <div class="mt-5 flex items-center gap-3">
-          <NuxtLink to="/login" class="btn-primary px-5 py-2.5">Sign in</NuxtLink>
+          <NuxtLink :to="ctaTo" class="btn-primary px-5 py-2.5">{{ ctaLabel }}</NuxtLink>
           <span class="rounded-full border border-brand/30 bg-brand/10 px-3 py-1.5 text-xs font-semibold text-brand">
             Coming soon
           </span>

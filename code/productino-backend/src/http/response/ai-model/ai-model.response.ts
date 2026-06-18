@@ -20,6 +20,13 @@ export class AiModelResponse {
   @ApiProperty({ example: true, description: 'Whether a credential is stored' }) hasKey: boolean;
   @ApiPropertyOptional({ example: '••••1234', nullable: true, description: 'Masked key hint' })
   keyHint: string | null;
+  @ApiProperty({ example: 142, description: 'Lifetime successful LLM calls served by this model' })
+  runCount: number;
+  @ApiProperty({ example: 481234, description: 'Lifetime input tokens' }) tokensIn: number;
+  @ApiProperty({ example: 192344, description: 'Lifetime output tokens' }) tokensOut: number;
+  @ApiProperty({ example: 673578, description: 'Lifetime total tokens (in + out)' }) totalTokens: number;
+  @ApiPropertyOptional({ nullable: true, description: 'When this model last served a call' })
+  lastUsedAt: Date | null;
   @ApiProperty() createdAt: Date;
   @ApiProperty() updatedAt: Date;
 
@@ -39,6 +46,11 @@ export class AiModelResponse {
       isActive: aiModel.isActive,
       hasKey: aiModel.hasKey,
       keyHint: aiModel.keyHint,
+      runCount: aiModel.runCount ?? 0,
+      tokensIn: aiModel.tokensIn ?? 0,
+      tokensOut: aiModel.tokensOut ?? 0,
+      totalTokens: aiModel.totalTokens,
+      lastUsedAt: aiModel.lastUsedAt ?? null,
       createdAt: aiModel.createdAt,
       updatedAt: aiModel.updatedAt,
     });

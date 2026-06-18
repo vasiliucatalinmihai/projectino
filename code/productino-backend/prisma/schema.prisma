@@ -121,6 +121,11 @@ model AiModel {
   // tenant models and the system default.
   options   Json     @default("{}")
   isActive  Boolean  @default(false)
+  // Lifetime usage, incremented at call time (see StructuredLlmService).
+  runCount   Int       @default(0)
+  tokensIn   Int       @default(0)
+  tokensOut  Int       @default(0)
+  lastUsedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

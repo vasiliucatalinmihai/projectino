@@ -849,7 +849,7 @@ function goToStage(anchor: string) {
       <div class="mb-5 mt-2 flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="kicker">// project</div>
-          <h1 class="m-0 flex items-baseline gap-2.5 text-2xl font-bold tracking-tight text-white">
+          <h1 class="m-0 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 break-words text-2xl font-bold tracking-tight text-white">
             {{ project.name }}
             <span class="font-mono text-[11px] font-normal text-neutral-600">#{{ project.id }}</span>
           </h1>

@@ -41,6 +41,21 @@ function toggleNav() {
   collapsed.value = !collapsed.value;
 }
 
+// Below md the sidebar is an off-canvas drawer. The desktop collapse preference
+// doesn't apply there (the drawer is always full-width with labels).
+const mobileNavOpen = ref(false);
+const isMobile = ref(false);
+onMounted(() => {
+  const mq = window.matchMedia('(max-width: 767px)');
+  const apply = () => (isMobile.value = mq.matches);
+  apply();
+  mq.addEventListener('change', apply);
+});
+const navCollapsed = computed(() => (isMobile.value ? false : collapsed.value));
+// Close the drawer after navigating.
+const route = useRoute();
+watch(() => route.fullPath, () => (mobileNavOpen.value = false));
+
 // Outline icon paths (Heroicons, 24×24, currentColor stroke).
 const ICONS: Record<string, string[]> = {
   dashboard: [
@@ -120,18 +135,29 @@ const bottomNav = computed(() =>
 
     <!-- Header: logo + app name on the left, user + logout on the right -->
     <header
-      class="flex items-center justify-between border-b border-neutral-800 bg-neutral-950 px-6 py-3"
+      class="flex items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-950 px-4 py-3 sm:px-6"
     >
-      <NuxtLink to="/projects" class="flex items-center gap-2 no-underline">
-        <img src="/mark.svg" alt="" width="28" height="28" class="rounded-md" />
-        <strong class="font-mono font-bold tracking-tight text-white"
-          >productino<span class="text-brand">.</span></strong
+      <div class="flex items-center gap-2">
+        <button
+          class="rounded-md p-1.5 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100 md:hidden"
+          aria-label="Open menu"
+          @click="mobileNavOpen = true"
         >
-        <span class="font-mono text-[10px] uppercase tracking-wider text-brand">// admin</span>
-      </NuxtLink>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="h-5 w-5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
+          </svg>
+        </button>
+        <NuxtLink to="/" class="flex items-center gap-2 no-underline">
+          <img src="/mark.svg" alt="" width="28" height="28" class="rounded-md" />
+          <strong class="font-mono font-bold tracking-tight text-white"
+            >productino<span class="text-brand">.</span></strong
+          >
+          <span class="hidden font-mono text-[10px] uppercase tracking-wider text-brand sm:inline">// admin</span>
+        </NuxtLink>
+      </div>
 
-      <div v-if="user" class="flex items-center gap-3">
-        <div class="text-right leading-tight">
+      <div v-if="user" class="flex items-center gap-2 sm:gap-3">
+        <div class="hidden text-right leading-tight md:block">
           <div class="flex items-center justify-end gap-2">
             <span class="text-sm font-semibold text-neutral-100">{{ user.email }}</span>
             <span
@@ -147,7 +173,7 @@ const bottomNav = computed(() =>
         </div>
         <button
           v-if="!isImpersonating"
-          class="btn-ghost"
+          class="btn-ghost hidden sm:inline-flex"
           title="Clear your password and set a new one via the activation page"
           @click="resetMyPassword"
         >
@@ -157,16 +183,26 @@ const bottomNav = computed(() =>
       </div>
     </header>
 
-    <!-- Body: collapsible left sidebar menu + main content -->
+    <!-- Body: sidebar menu (off-canvas drawer below md) + main content -->
     <div class="flex flex-1">
+      <!-- mobile drawer backdrop -->
+      <div
+        v-if="mobileNavOpen"
+        class="fixed inset-0 z-30 bg-black/60 md:hidden"
+        @click="mobileNavOpen = false"
+      />
       <aside
-        class="flex flex-col border-r border-neutral-800 bg-neutral-950 py-4 transition-all duration-200"
-        :class="collapsed ? 'w-16 px-2' : 'w-52 px-4'"
+        class="fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-neutral-800 bg-neutral-950 px-4 py-4 transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:transition-all"
+        :class="[
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full',
+          collapsed ? 'md:w-16 md:px-2' : 'md:w-52 md:px-4',
+        ]"
       >
-        <div class="mb-2 flex items-center" :class="collapsed ? 'justify-center' : 'justify-between px-2'">
-          <div v-if="!collapsed" class="kicker">// menu</div>
+        <div class="mb-2 flex items-center" :class="navCollapsed ? 'justify-center' : 'justify-between px-2'">
+          <div v-if="!navCollapsed" class="kicker">// menu</div>
+          <!-- desktop collapse toggle -->
           <button
-            class="rounded-md p-1.5 text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"
+            class="hidden rounded-md p-1.5 text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200 md:block"
             :title="collapsed ? 'Expand menu' : 'Collapse menu'"
             @click="toggleNav"
           >
@@ -185,19 +221,27 @@ const bottomNav = computed(() =>
               />
             </svg>
           </button>
+          <!-- mobile close -->
+          <button
+            class="rounded-md p-1.5 text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200 md:hidden"
+            aria-label="Close menu"
+            @click="mobileNavOpen = false"
+          >
+            ✕
+          </button>
         </div>
 
         <nav class="flex flex-col gap-1">
-          <NavLink v-for="item in topNav" :key="item.to" :item="item" :collapsed="collapsed" />
+          <NavLink v-for="item in topNav" :key="item.to" :item="item" :collapsed="navCollapsed" />
         </nav>
 
         <!-- Settings-like items pinned to the bottom -->
         <nav class="mt-auto flex flex-col gap-1 border-t border-neutral-800 pt-3">
-          <NavLink v-for="item in bottomNav" :key="item.to" :item="item" :collapsed="collapsed" />
+          <NavLink v-for="item in bottomNav" :key="item.to" :item="item" :collapsed="navCollapsed" />
         </nav>
       </aside>
 
-      <main class="flex-1 px-6 py-8">
+      <main class="min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8">
         <div class="mx-auto max-w-7xl">
           <slot />
         </div>

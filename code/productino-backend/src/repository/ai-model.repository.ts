@@ -26,4 +26,14 @@ export class AiModelRepository extends PrismaRepository<
   findActiveForAccount(accountId: number): Promise<AiModel | null> {
     return this.findFirst({ where: { accountId, isActive: true } });
   }
+
+  /** Atomically add one call's spend to a model's lifetime counters. */
+  async recordUsage(id: number, tokensIn: number, tokensOut: number): Promise<void> {
+    await this.update(id, {
+      runCount: { increment: 1 },
+      tokensIn: { increment: tokensIn },
+      tokensOut: { increment: tokensOut },
+      lastUsedAt: new Date(),
+    } as any);
+  }
 }

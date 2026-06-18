@@ -1,6 +1,7 @@
 import { BadGatewayException, Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
 import type { ZodType } from 'zod';
 import { PromptManagerService } from '../services/prompt-manager.service';
+import { AiModelRepository } from '../repository';
 import { LlmService } from './llm.service';
 import { LlmConfigResolverService } from './llm-config-resolver.service';
 import {
@@ -66,6 +67,7 @@ export class StructuredLlmService {
     private readonly prompts: PromptManagerService,
     private readonly llm: LlmService,
     private readonly resolver: LlmConfigResolverService,
+    private readonly aiModels: AiModelRepository,
   ) {}
 
   async run<T>(opts: StructuredRunOptions<T>): Promise<T> {
@@ -151,6 +153,12 @@ export class StructuredLlmService {
               },
               this.ctx(opts.subject),
             );
+            // Attribute the spend to the AiModel that served it (best-effort).
+            if (config.modelId != null) {
+              await this.aiModels
+                .recordUsage(config.modelId, result.usage.tokensIn ?? 0, result.usage.tokensOut ?? 0)
+                .catch(() => undefined);
+            }
             return parsed.data;
           }
 

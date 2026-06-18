@@ -12,8 +12,17 @@ export class AiModel extends BaseEntity {
   baseUrl: string | null;
   options: Record<string, any>;
   isActive: boolean;
+  // Lifetime usage, accrued per LLM call.
+  runCount: number;
+  tokensIn: number;
+  tokensOut: number;
+  lastUsedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+
+  get totalTokens(): number {
+    return (this.tokensIn ?? 0) + (this.tokensOut ?? 0);
+  }
 
   constructor(partial: Partial<AiModel>) {
     super(partial);

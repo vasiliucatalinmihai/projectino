@@ -18,6 +18,11 @@ interface AiModel {
   isActive: boolean;
   hasKey: boolean;
   keyHint: string | null;
+  runCount: number;
+  tokensIn: number;
+  tokensOut: number;
+  totalTokens: number;
+  lastUsedAt: string | null;
 }
 interface Effective {
   source: 'account' | 'system';
@@ -45,11 +50,26 @@ const { data: effective, refresh: refreshEffective } = await useAsyncData<Effect
 // BYO state is implied by the resolved source: 'account' = own model, 'system' = default.
 const byo = computed(() => effective.value?.source === 'account');
 
+// Rolled-up usage across this account's models.
+const totals = computed(() => {
+  const ms = models.value ?? [];
+  return {
+    runs: ms.reduce((s, m) => s + (m.runCount ?? 0), 0),
+    tokensIn: ms.reduce((s, m) => s + (m.tokensIn ?? 0), 0),
+    tokensOut: ms.reduce((s, m) => s + (m.tokensOut ?? 0), 0),
+    total: ms.reduce((s, m) => s + (m.totalTokens ?? 0), 0),
+  };
+});
+
+const fmtInt = (n: number) => (n ?? 0).toLocaleString('en-US');
+
 const columns = [
   { key: 'label', label: 'Label' },
   { key: 'provider', label: 'Provider' },
   { key: 'model', label: 'Model' },
   { key: 'keyHint', label: 'Key' },
+  { key: 'runsLabel', label: 'Runs' },
+  { key: 'tokensLabel', label: 'Tokens' },
   { key: 'activeLabel', label: 'Active' },
 ];
 const rows = computed(() =>
@@ -57,6 +77,8 @@ const rows = computed(() =>
     ...m,
     label: m.label ?? '—',
     keyHint: m.keyHint ?? 'no key',
+    runsLabel: fmtInt(m.runCount),
+    tokensLabel: m.totalTokens ? `${fmtInt(m.totalTokens)}` : '—',
     activeLabel: m.isActive ? '● active' : '',
   })),
 );
@@ -256,6 +278,13 @@ async function remove(m: AiModel) {
         <template v-if="!byo"> While off, models are saved but the platform default is used.</template>
       </p>
     </div>
+
+    <p v-if="totals.runs" class="mb-3 text-xs text-neutral-500">
+      <span class="font-mono uppercase tracking-wider">// usage</span>
+      <span class="ml-1 font-mono font-bold text-brand">{{ fmtInt(totals.total) }}</span> tokens
+      <span class="text-neutral-600">({{ fmtInt(totals.tokensIn) }} in · {{ fmtInt(totals.tokensOut) }} out)</span>
+      across <span class="text-neutral-300">{{ fmtInt(totals.runs) }}</span> runs
+    </p>
 
     <DataGrid
       :creatable="canManage"
