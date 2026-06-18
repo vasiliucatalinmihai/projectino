@@ -208,6 +208,9 @@ model Project {
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   name         String
   stage        ProjectStage  @default(BRIEFING)
+  // Optional per-project override of the discovery rubric (RubricArea[]).
+  // null → the built-in default rubric (see common/rubric.ts).
+  rubric       Json?
   // Belief Graph (the project's source of truth). Raw inputs live in `sources`;
   // `beliefNodes` + `coverageAreas` + `questions` are the Understanding layer;
   // `rounds` snapshot convergence so deltas can be shown between question rounds.

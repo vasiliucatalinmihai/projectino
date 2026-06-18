@@ -69,6 +69,89 @@ const usageByPrompt = computed(() =>
   [...(usage.value?.byPrompt ?? [])].sort((a, b) => b.totalTokens - a.totalTokens),
 );
 
+// --- discovery rubric (which areas are scored for this project) ---
+interface RubricArea {
+  key: string;
+  name: string;
+  weight: string;
+  hint: string | null;
+}
+interface ProjectRubric {
+  isCustom: boolean;
+  areas: RubricArea[];
+  catalog: RubricArea[];
+}
+const { data: rubric, refresh: refreshRubric } = await useAsyncData<ProjectRubric | null>(
+  `project-${projectId}-rubric`,
+  () => useApi<ProjectRubric>(`/projects/${projectId}/rubric`).catch(() => null),
+);
+
+// Local checkbox state — the set of enabled area keys, seeded from the server.
+const enabledKeys = ref<Set<string>>(new Set());
+const rubricSaving = ref(false);
+const rubricError = ref('');
+watch(
+  rubric,
+  () => {
+    enabledKeys.value = new Set((rubric.value?.areas ?? []).map((a) => a.key));
+    rubricError.value = '';
+  },
+  { immediate: true },
+);
+
+function toggleArea(key: string) {
+  const next = new Set(enabledKeys.value);
+  next.has(key) ? next.delete(key) : next.add(key);
+  enabledKeys.value = next;
+}
+
+// Dirty when the local selection differs from what the server has.
+const rubricDirty = computed(() => {
+  const current = new Set((rubric.value?.areas ?? []).map((a) => a.key));
+  if (current.size !== enabledKeys.value.size) return true;
+  for (const key of enabledKeys.value) if (!current.has(key)) return true;
+  return false;
+});
+
+function weightClass(weight: string): string {
+  if (weight === 'high') return 'bg-red-500/10 text-red-300';
+  if (weight === 'medium') return 'bg-amber-500/10 text-amber-300';
+  return 'bg-neutral-700/40 text-neutral-400';
+}
+
+async function saveRubric() {
+  if (!enabledKeys.value.size) {
+    rubricError.value = 'Enable at least one area.';
+    return;
+  }
+  rubricSaving.value = true;
+  rubricError.value = '';
+  try {
+    await useApi(`/projects/${projectId}/rubric`, {
+      method: 'PUT',
+      body: { enabled: [...enabledKeys.value] },
+    });
+    await refreshRubric();
+  } catch (e: any) {
+    rubricError.value = e?.data?.message ?? 'Save failed';
+  } finally {
+    rubricSaving.value = false;
+  }
+}
+
+async function resetRubric() {
+  rubricSaving.value = true;
+  rubricError.value = '';
+  try {
+    await useApi(`/projects/${projectId}/rubric`, { method: 'DELETE' });
+    await refreshRubric();
+  } catch (e: any) {
+    rubricError.value = e?.data?.message ?? 'Reset failed';
+  } finally {
+    rubricSaving.value = false;
+  }
+}
+
 const details = computed(() => [
   { label: 'ID', value: project.value?.id },
   { label: 'Client', value: project.value?.clientName },
@@ -732,6 +815,72 @@ watch([graph, definition, delivery, proposal], () => {
             <span class="font-mono text-neutral-400">{{ p.promptKey }}</span>
             <span class="text-neutral-500">{{ formatInt(p.totalTokens) }} · {{ p.runs }} runs</span>
           </div>
+        </div>
+      </Collapsible>
+
+      <!-- discovery rubric -->
+      <Collapsible
+        v-if="rubric"
+        title="// discovery rubric"
+        :count="rubric.isCustom ? 'custom' : 'default'"
+        class="mt-4"
+      >
+        <template #actions>
+          <span class="font-mono text-[10px] text-neutral-600">
+            {{ enabledKeys.size }}/{{ rubric.catalog.length }} enabled
+          </span>
+        </template>
+
+        <p class="mb-3 text-sm text-neutral-400">
+          The areas scored for completeness. Enable the ones relevant to this project; changes apply
+          on the next <span class="font-mono text-neutral-300">Score coverage</span> run.
+        </p>
+
+        <div class="grid gap-2 sm:grid-cols-2">
+          <label
+            v-for="area in rubric.catalog"
+            :key="area.key"
+            class="flex items-start gap-2.5 rounded-lg border border-neutral-800 bg-neutral-950/40 p-3 transition-colors"
+            :class="canManage ? 'cursor-pointer hover:border-neutral-700' : 'cursor-default'"
+          >
+            <input
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 shrink-0 accent-brand"
+              :checked="enabledKeys.has(area.key)"
+              :disabled="!canManage || rubricSaving"
+              @change="toggleArea(area.key)"
+            />
+            <span class="min-w-0">
+              <span class="block text-sm font-medium text-neutral-100">{{ area.name }}</span>
+              <span class="mt-1 flex flex-wrap items-center gap-2">
+                <span class="font-mono text-[10px] uppercase tracking-wide text-neutral-500">{{ area.key }}</span>
+                <span class="rounded px-1.5 py-0.5 font-mono text-[10px] uppercase" :class="weightClass(area.weight)">
+                  {{ area.weight }}
+                </span>
+              </span>
+              <span v-if="area.hint" class="mt-1 block text-xs leading-snug text-neutral-500">{{ area.hint }}</span>
+            </span>
+          </label>
+        </div>
+
+        <p v-if="rubricError" class="mt-3 text-sm text-red-400">{{ rubricError }}</p>
+
+        <div v-if="canManage" class="mt-4 flex items-center gap-3">
+          <button
+            class="btn-primary"
+            :disabled="!rubricDirty || rubricSaving || !enabledKeys.size"
+            @click="saveRubric"
+          >
+            {{ rubricSaving ? 'Saving…' : 'Save rubric' }}
+          </button>
+          <button
+            v-if="rubric.isCustom"
+            class="btn-ghost text-xs"
+            :disabled="rubricSaving"
+            @click="resetRubric"
+          >
+            Reset to default
+          </button>
         </div>
       </Collapsible>
 

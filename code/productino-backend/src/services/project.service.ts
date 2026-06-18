@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ProjectStage, SourceKind } from '@prisma/client';
+import { Prisma, ProjectStage, SourceKind } from '@prisma/client';
 import {
   ClientRepository,
   ProjectRepository,
@@ -9,6 +9,7 @@ import {
   TokenUsage,
 } from '../repository';
 import { Client, Project, User } from '../entities';
+import { RubricArea, RubricService } from './rubric.service';
 
 // Service-level inputs (no HTTP DTOs).
 export interface CreateProjectInput {
@@ -28,6 +29,13 @@ export interface ProjectTokenUsage extends TokenUsage {
   byPrompt: PromptTokenUsage[];
 }
 
+/** A project's effective rubric, whether it's customized, and the full catalog. */
+export interface ProjectRubric {
+  isCustom: boolean;
+  areas: RubricArea[];
+  catalog: RubricArea[];
+}
+
 // Load the briefing source alongside the project so `project.briefing` resolves.
 const PROJECT_INCLUDE = {
   client: true,
@@ -42,6 +50,7 @@ export class ProjectService {
     private readonly clients: ClientRepository,
     private readonly sources: SourceRepository,
     private readonly promptRuns: PromptRunRepository,
+    private readonly rubric: RubricService,
   ) {}
 
   // Everyone is scoped to their own account; super admins reach other accounts
@@ -129,6 +138,38 @@ export class ProjectService {
       this.promptRuns.tokenUsageByPromptForSubject('project', id),
     ]);
     return { ...totals, byPrompt };
+  }
+
+  /** The project's effective discovery rubric (+ whether it's custom + the catalog). */
+  async getRubric(id: number, user: User): Promise<ProjectRubric> {
+    const project = await this.findOne(id, user); // enforces tenancy
+    return this.buildRubric(project);
+  }
+
+  /**
+   * Set (or clear, when `config` is null) the project's rubric override. A non-null
+   * config is validated by RubricService; invalid input surfaces as a 400.
+   */
+  async setRubric(id: number, config: unknown | null, user: User): Promise<ProjectRubric> {
+    await this.findOne(id, user); // enforces tenancy
+    let value: Prisma.InputJsonValue | typeof Prisma.DbNull = Prisma.DbNull;
+    if (config != null) {
+      try {
+        value = this.rubric.normalizeConfig(config) as unknown as Prisma.InputJsonValue;
+      } catch (error: any) {
+        throw new BadRequestException(error?.message ?? 'Invalid rubric configuration');
+      }
+    }
+    await this.projects.update(id, { rubric: value } as any);
+    return this.buildRubric(await this.findOne(id, user));
+  }
+
+  private buildRubric(project: Project): ProjectRubric {
+    return {
+      isCustom: this.rubric.isCustom(project),
+      areas: this.rubric.forProject(project),
+      catalog: this.rubric.catalog(),
+    };
   }
 
   /** Create or replace the project's BRIEFING source (the seed input). */

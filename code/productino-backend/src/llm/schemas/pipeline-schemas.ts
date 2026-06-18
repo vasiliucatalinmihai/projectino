@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { RUBRIC_KEYS } from '../../common/rubric';
 
 /**
  * Zod schemas for every prompt's output. Validation AND normalization live here
@@ -27,10 +26,15 @@ const confidence01 = z.preprocess((v) => {
   return Math.max(0, Math.min(1, Math.round(scaled * 100) / 100));
 }, z.number());
 
-/** A rubric coverage key, or null if not one of the known keys. */
+/**
+ * A rubric coverage key: a lowercased, trimmed slug, or null. Kept rubric-agnostic
+ * (no fixed key set) since the effective rubric is now per-project — the prompt is
+ * given the project's enabled keys, and any unknown key degrades to "uncategorized"
+ * when beliefs are grouped downstream.
+ */
 const coverageKey = z.preprocess((v) => {
   const k = (typeof v === 'string' ? v : '').toLowerCase().trim();
-  return RUBRIC_KEYS.includes(k) ? k : null;
+  return k || null;
 }, z.string().nullable());
 
 /** Coerce to string[]; a single string is split on lines/bullets/semicolons or wrapped. */

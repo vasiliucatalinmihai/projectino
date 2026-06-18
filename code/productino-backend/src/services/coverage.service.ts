@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { CoverageStatus, QuestionStatus } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
-import { RUBRIC, RUBRIC_PROMPT_LIST, WEIGHT_VALUE } from '../common/rubric';
 import { BeliefNode, ProjectRound, User } from '../entities';
 import {
   BeliefNodeRepository,
@@ -12,6 +11,7 @@ import {
 import { ScoreCoverageResult, ScoreCoverageSchema, StructuredLlmService } from '../llm';
 import { ProjectService } from './project.service';
 import { PipelineResetService } from './pipeline-reset.service';
+import { RubricArea, RubricService } from './rubric.service';
 
 /**
  * Phase 3 (the heart): score the belief graph against the rubric. The LLM judges
@@ -29,6 +29,7 @@ export class CoverageService {
     private readonly rounds: ProjectRoundRepository,
     private readonly structured: StructuredLlmService,
     private readonly reset: PipelineResetService,
+    private readonly rubric: RubricService,
   ) {}
 
   async run(projectId: number, user: User): Promise<ProjectRound> {
@@ -38,13 +39,15 @@ export class CoverageService {
       throw new BadRequestException('Extract beliefs before scoring coverage');
     }
 
+    const rubric = this.rubric.forProject(project);
+
     const result = await this.structured.run({
       key: PromptKey.SCORE_COVERAGE,
-      vars: { rubricList: RUBRIC_PROMPT_LIST, beliefsList: this.beliefsList(nodes) },
+      vars: { rubricList: this.rubric.promptList(rubric), beliefsList: this.beliefsList(nodes, rubric) },
       schema: ScoreCoverageSchema,
       accountId: user.accountId,
       subject: { type: 'project', id: project.id },
-      scoreOf: (value) => this.weightedRollup(value),
+      scoreOf: (value) => this.weightedRollup(value, rubric),
     });
 
     const nextIndex = (await this.rounds.findAllForProject(projectId)).length + 1;
@@ -52,8 +55,8 @@ export class CoverageService {
       result.areas.map((area) => [area.key.toLowerCase().trim(), area]),
     );
 
-    // Upsert all 11 rubric categories (in order), deriving status from confidence.
-    for (const area of RUBRIC) {
+    // Upsert every rubric category (in order), deriving status from confidence.
+    for (const area of rubric) {
       const confidence = areaByKey.get(area.key)?.rollupConfidence ?? 0;
       const status = this.statusFor(confidence);
       await this.coverage.upsert(
@@ -70,7 +73,10 @@ export class CoverageService {
         { name: area.name, weight: area.weight, rollupConfidence: confidence, status, round: nextIndex } as any,
       );
     }
-    const rollup = this.weightedRollup(result);
+    // Drop coverage rows for areas no longer in the (possibly customized) rubric.
+    await this.coverage.deleteMany({ projectId, key: { notIn: rubric.map((area) => area.key) } } as any);
+
+    const rollup = this.weightedRollup(result, rubric);
 
     // Regenerate the question set, preserving anything already answered by a client.
     await this.questions.deleteMany({ projectId, status: { not: QuestionStatus.ANSWERED } });
@@ -101,13 +107,13 @@ export class CoverageService {
   // ── helpers ─────────────────────────────────────────────────────
 
   /** Weighted average of per-area confidence — the "defined enough?" gate value. */
-  private weightedRollup(result: ScoreCoverageResult): number {
+  private weightedRollup(result: ScoreCoverageResult, rubric: RubricArea[]): number {
     const byKey = new Map(result.areas.map((area) => [area.key.toLowerCase().trim(), area.rollupConfidence]));
     let weightedSum = 0;
     let weightTotal = 0;
-    for (const area of RUBRIC) {
+    for (const area of rubric) {
       const confidence = byKey.get(area.key) ?? 0;
-      const weight = WEIGHT_VALUE[area.weight];
+      const weight = this.rubric.weightValue(area.weight);
       weightedSum += confidence * weight;
       weightTotal += weight;
     }
@@ -122,7 +128,7 @@ export class CoverageService {
   }
 
   /** Belief nodes rendered as a category-grouped list for the prompt. */
-  private beliefsList(nodes: BeliefNode[]): string {
+  private beliefsList(nodes: BeliefNode[], rubric: RubricArea[]): string {
     const nodesByCoverageKey = new Map<string, BeliefNode[]>();
     for (const node of nodes) {
       const key = node.coverageKey ?? 'uncategorized';
@@ -135,7 +141,7 @@ export class CoverageService {
       (node.description ? ` — ${node.description}` : '');
 
     const lines: string[] = [];
-    for (const area of RUBRIC) {
+    for (const area of rubric) {
       lines.push(`### ${area.key} — ${area.name}`);
       const areaNodes = nodesByCoverageKey.get(area.key) ?? [];
       lines.push(areaNodes.length ? areaNodes.map(formatNode).join('\n') : '  none');

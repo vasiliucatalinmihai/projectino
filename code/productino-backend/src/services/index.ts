@@ -1,6 +1,7 @@
 export * from './account.service';
 export * from './user.service';
 export * from './project.service';
+export * from './rubric.service';
 export * from './belief-graph.service';
 export * from './extraction.service';
 export * from './coverage.service';

@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { ProjectStage, QuestionStatus } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
-import { RUBRIC } from '../common/rubric';
 import { BeliefNode, CoverageArea, ProductDefinition, Question, User } from '../entities';
 import {
   BeliefNodeRepository,
@@ -84,7 +83,7 @@ export class DefinitionService {
       key: PromptKey.SYNTHESIZE_PRD,
       vars: {
         coverageList: this.coverageList(areas),
-        beliefsList: this.beliefsList(nodes),
+        beliefsList: this.beliefsList(nodes, areas),
         answeredList: this.answeredList(questions),
       },
       schema: SynthesizePrdSchema,
@@ -120,16 +119,20 @@ export class DefinitionService {
 
   // ── prompt-input builders ────────────────────────────────────────
 
-  private coverageList(areas: CoverageArea[]): string {
-    const areasByKey = new Map(areas.map((area) => [area.key, area]));
-    return RUBRIC.map((rubricEntry) => {
-      const area = areasByKey.get(rubricEntry.key);
-      const pct = area ? Math.round(area.rollupConfidence * 100) : 0;
-      return `- ${rubricEntry.name}: ${pct}% (${area?.status ?? 'UNDERDEFINED'})`;
-    }).join('\n');
+  // The persisted coverage areas ARE the rubric snapshot from scoring, in
+  // creation order — drive the PRD projection off them (no rubric const needed).
+  private sortedAreas(areas: CoverageArea[]): CoverageArea[] {
+    return [...areas].sort((a, b) => a.id - b.id);
   }
 
-  private beliefsList(nodes: BeliefNode[]): string {
+  private coverageList(areas: CoverageArea[]): string {
+    if (!areas.length) return '(none)';
+    return this.sortedAreas(areas)
+      .map((area) => `- ${area.name}: ${Math.round(area.rollupConfidence * 100)}% (${area.status})`)
+      .join('\n');
+  }
+
+  private beliefsList(nodes: BeliefNode[], areas: CoverageArea[]): string {
     if (!nodes.length) return '(none)';
     const nodesByKey = new Map<string, BeliefNode[]>();
     for (const node of nodes) {
@@ -142,16 +145,19 @@ export class DefinitionService {
       `  - [${node.status} ${Math.round(node.confidence * 100)}%] ${node.kind}: ${node.name}` +
       (node.description ? ` — ${node.description}` : '');
     const lines: string[] = [];
-    for (const area of RUBRIC) {
+    const shown = new Set<string>();
+    for (const area of this.sortedAreas(areas)) {
       const areaNodes = nodesByKey.get(area.key);
       if (!areaNodes?.length) continue;
+      shown.add(area.key);
       lines.push(`### ${area.name}`);
       lines.push(areaNodes.map(formatNode).join('\n'));
     }
-    const uncategorizedNodes = nodesByKey.get('uncategorized');
-    if (uncategorizedNodes?.length) {
+    // Anything not mapped to a current area (uncategorized, or a now-disabled area).
+    const leftover = [...nodesByKey.entries()].filter(([key]) => !shown.has(key));
+    if (leftover.length) {
       lines.push('### uncategorized');
-      lines.push(uncategorizedNodes.map(formatNode).join('\n'));
+      lines.push(leftover.flatMap(([, areaNodes]) => areaNodes).map(formatNode).join('\n'));
     }
     return lines.join('\n');
   }

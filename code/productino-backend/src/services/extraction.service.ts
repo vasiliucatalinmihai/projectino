@@ -1,13 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { BeliefStatus, ProjectStage } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
-import { RUBRIC_PROMPT_LIST } from '../common/rubric';
 import { BeliefNode, Provenance, Source, User } from '../entities';
 import { BeliefNodeRepository, ProjectRepository, SourceRepository } from '../repository';
 import { ExtractBeliefsResult, ExtractBeliefsSchema, StructuredLlmService } from '../llm';
 import { ProjectService } from './project.service';
 import { PipelineResetService } from './pipeline-reset.service';
 import { GraphValidationService } from './graph-validation.service';
+import { RubricService } from './rubric.service';
 
 /** Beyond this, an "ASSUMED" belief can't claim more certainty than a default. */
 const UNGROUNDED_CONFIDENCE_CAP = 0.4;
@@ -30,6 +30,7 @@ export class ExtractionService {
     private readonly structured: StructuredLlmService,
     private readonly reset: PipelineResetService,
     private readonly graphValidation: GraphValidationService,
+    private readonly rubric: RubricService,
   ) {}
 
   /** Extract beliefs from a project source (defaults to the briefing) and persist them. */
@@ -39,7 +40,11 @@ export class ExtractionService {
 
     const { beliefs } = await this.structured.run({
       key: PromptKey.EXTRACT_BELIEFS,
-      vars: { source: source.content, sourceKind: source.kind, rubricList: RUBRIC_PROMPT_LIST },
+      vars: {
+        source: source.content,
+        sourceKind: source.kind,
+        rubricList: this.rubric.promptList(this.rubric.forProject(project)),
+      },
       schema: ExtractBeliefsSchema,
       accountId: user.accountId,
       subject: { type: 'project', id: project.id },

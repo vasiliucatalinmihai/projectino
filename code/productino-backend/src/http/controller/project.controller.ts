@@ -7,8 +7,10 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
@@ -23,8 +25,8 @@ import { ProjectService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { User } from '../../entities';
 import { CurrentUser, RequirePermissions } from '../decorators';
-import { CreateProjectRequest, UpdateProjectRequest } from '../request/project';
-import { ProjectResponse, ProjectUsageResponse } from '../response/project';
+import { CreateProjectRequest, SetRubricRequest, UpdateProjectRequest } from '../request/project';
+import { ProjectResponse, ProjectRubricResponse, ProjectUsageResponse } from '../response/project';
 
 @ApiTags('Projects')
 @ApiBearerAuth('bearer')
@@ -69,6 +71,57 @@ export class ProjectController {
     @CurrentUser() user: User,
   ): Promise<ProjectUsageResponse> {
     return new ProjectUsageResponse(await this.projectService.tokenUsage(id, user));
+  }
+
+  @Get(':id/rubric')
+  @RequirePermissions(PermissionKey.VIEW_ONLY)
+  @ApiOperation({
+    summary: "A project's discovery rubric",
+    description:
+      'Requires VIEW_ONLY. The effective rubric scored against, whether it is ' +
+      'customized, and the full catalog of available areas.',
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiOkResponse({ type: ProjectRubricResponse })
+  async getRubric(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ProjectRubricResponse> {
+    return ProjectRubricResponse.from(await this.projectService.getRubric(id, user));
+  }
+
+  @Put(':id/rubric')
+  @RequirePermissions(PermissionKey.UPDATE_SETTINGS)
+  @ApiOperation({
+    summary: "Set a project's rubric override",
+    description:
+      'Requires UPDATE_SETTINGS. Enables a subset of the catalog areas with ' +
+      'optional per-area overrides (weight/name/hint).',
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiOkResponse({ type: ProjectRubricResponse })
+  @ApiBadRequestResponse({ description: 'Invalid rubric configuration' })
+  async setRubric(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: SetRubricRequest,
+    @CurrentUser() user: User,
+  ): Promise<ProjectRubricResponse> {
+    return ProjectRubricResponse.from(await this.projectService.setRubric(id, body, user));
+  }
+
+  @Delete(':id/rubric')
+  @RequirePermissions(PermissionKey.UPDATE_SETTINGS)
+  @ApiOperation({
+    summary: "Clear a project's rubric override",
+    description: 'Requires UPDATE_SETTINGS. Reverts the project to the built-in default rubric.',
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiOkResponse({ type: ProjectRubricResponse })
+  async clearRubric(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: User,
+  ): Promise<ProjectRubricResponse> {
+    return ProjectRubricResponse.from(await this.projectService.setRubric(id, null, user));
   }
 
   @Post()
