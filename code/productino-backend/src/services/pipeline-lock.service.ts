@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { KeyedMutex } from '../common/concurrency';
+import { PerKeyLock } from '../common/concurrency';
 
 /**
  * Serializes pipeline mutations per project, so two concurrent requests for the
@@ -10,9 +10,9 @@ import { KeyedMutex } from '../common/concurrency';
  */
 @Injectable()
 export class PipelineLockService {
-  private readonly mutex = new KeyedMutex();
+  private readonly lock = new PerKeyLock();
 
   run<T>(projectId: number, fn: () => Promise<T>): Promise<T> {
-    return this.mutex.run(`project:${projectId}`, fn);
+    return this.lock.run(`project:${projectId}`, fn);
   }
 }

@@ -80,7 +80,7 @@ export class DefinitionService {
     ]);
 
     const content = await this.structured.run({
-      key: PromptKey.SYNTHESIZE_PRD,
+      promptKey: PromptKey.SYNTHESIZE_PRD,
       vars: {
         coverageList: this.coverageList(areas),
         beliefsList: this.beliefsList(nodes, areas),

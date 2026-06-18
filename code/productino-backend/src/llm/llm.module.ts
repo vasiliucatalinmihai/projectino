@@ -12,11 +12,6 @@ import { LlmService } from './llm.service';
 
 /**
  * LLM feature module: provider-agnostic prompt execution.
- *
- * PrismaService comes from the global PrismaModule, so the repositories below
- * share the app's single connection pool. Exports the runner (`LlmService`) and
- * the resolver so other parts of the app — e.g. AiModelService's "effective
- * model" lookup — can reuse the one resolution path.
  */
 @Module({
   providers: [

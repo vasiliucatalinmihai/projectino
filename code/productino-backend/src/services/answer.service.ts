@@ -40,7 +40,7 @@ export class AnswerService {
 
     const openIds = new Set(openQuestions.map((question) => question.id));
     const mapping = await this.structured.run({
-      key: PromptKey.MAP_ANSWERS,
+      promptKey: PromptKey.MAP_ANSWERS,
       vars: { questions: this.questionsList(openQuestions), answers: replyText },
       schema: MapAnswersSchema,
       accountId: user.accountId,

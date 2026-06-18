@@ -26,12 +26,6 @@ export class Project extends BaseEntity {
     super(partial);
   }
 
-  // Example of active-record behaviour: domain logic lives on the entity,
-  // then `projectRepository.save(project)` persists the mutated instance.
-  advanceTo(stage: ProjectStage): void {
-    this.stage = stage;
-  }
-
   /** The initial briefing text, derived from the BRIEFING source if loaded. */
   get briefing(): string | null {
     const src = this.sources?.find((s) => s.kind === SourceKind.BRIEFING);

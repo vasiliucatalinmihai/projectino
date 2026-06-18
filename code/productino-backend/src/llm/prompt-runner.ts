@@ -1,11 +1,3 @@
-/**
- * The provider-agnostic LLM port the rest of the app codes against.
- *
- * Callers (belief extraction, coverage scoring, PRD synthesis, …) depend only on `PromptRunner` and
- * never import a vendor SDK. `LlmService` implements this; per-account provider
- * resolution and the concrete HTTP adapters live behind it. Swapping the
- * adapter layer (e.g. for the Vercel AI SDK) is invisible to callers.
- */
 
 export type LlmRole = 'system' | 'user' | 'assistant';
 
@@ -59,8 +51,6 @@ export interface LlmResult {
 
 /**
  * A fully-resolved, runnable model config (includes the decrypted credential).
- * Produced by LlmConfigResolverService; consumed by the adapters. Never expose
- * this over HTTP — use `EffectiveModel` for that.
  */
 export interface ResolvedLlmConfig {
   source: LlmConfigSource;
@@ -97,11 +87,11 @@ export class LlmNotConfiguredError extends Error {
   }
 }
 
-/** The upstream provider rejected the call or returned an unusable response. */
+/** The provider rejected the call or returned an unusable response. */
 export class LlmProviderError extends Error {
-  /** HTTP status from the provider, when the failure was an HTTP response. */
+  /** HTTP status from the provider */
   readonly status?: number;
-  /** Seconds to wait before retrying, parsed from a `Retry-After` header. */
+  /** Seconds to wait before retrying */
   readonly retryAfter?: number;
   /** Transient failures (429 / 5xx / network) are safe to retry with backoff. */
   readonly retryable: boolean;

@@ -2,7 +2,7 @@
  * Canonical permission keys. These must match the `key` column of the rows in
  * the `permissions` table (see prisma/seed.ts). Use them in route decorators:
  *
- *   @RequirePermissions(PermissionKey.RUN_LLM)
+ *  @RequirePermissions(PermissionKey.RUN_LLM)
  */
 export enum PermissionKey {
   SUPER_ADMIN = 'SUPER_ADMIN', // platform owner — crosses all accounts/tenants

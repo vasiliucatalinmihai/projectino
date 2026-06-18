@@ -7,7 +7,7 @@ import { z } from 'zod';
  * in StructuredLlmService.
  */
 
-// ── shared helpers ──────────────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────────
 
 const toText = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v));
 

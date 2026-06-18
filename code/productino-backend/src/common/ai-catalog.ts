@@ -1,4 +1,6 @@
 /**
+ * @todo pull from providers
+ *
  * AI model catalog: provider → selectable model IDs, used to populate the admin
  * dropdowns in the frontend.
  *

@@ -22,9 +22,6 @@ import {
  * Resolves the calling account's effective config (bring-your-own-AI vs the
  * system default), then dispatches to the matching provider adapter. Callers
  * depend on this (the `PromptRunner` port) and never touch a vendor SDK.
- *
- * To add a provider: implement an adapter, register it in LlmModule, and add it
- * to the constructor list below.
  */
 @Injectable()
 export class LlmService implements PromptRunner {
@@ -32,7 +29,7 @@ export class LlmService implements PromptRunner {
   private readonly adapters = new Map<string, LlmProviderAdapter>();
 
   constructor(
-    private readonly resolver: LlmConfigResolverService,
+    private readonly llmConfigResolver: LlmConfigResolverService,
     anthropic: AnthropicAdapter,
     openai: OpenAiAdapter,
     deepseek: DeepSeekAdapter,
@@ -46,16 +43,11 @@ export class LlmService implements PromptRunner {
     }
   }
 
-  /** Resolve the account's effective config, then run the prompt. */
   async run(accountId: number, req: LlmRequest): Promise<LlmResult> {
-    const config = await this.resolver.resolve(accountId);
-    return this.dispatch(config, req);
+    const llmConfig = await this.llmConfigResolver.resolve(accountId);
+    return this.dispatch(llmConfig, req);
   }
 
-  /**
-   * Run against an explicitly-supplied config (bypasses resolution). Used to
-   * test a specific model's credentials without it being the account's active one.
-   */
   runWith(config: ResolvedLlmConfig, req: LlmRequest): Promise<LlmResult> {
     return this.dispatch(config, req);
   }

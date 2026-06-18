@@ -1,6 +1,5 @@
 import { BaseEntity } from './base.entity';
 
-/** The structured PRD content projected from the graph. */
 export interface DefinitionContent {
   summary?: string;
   in_scope?: string[];
@@ -12,10 +11,6 @@ export interface DefinitionContent {
   [key: string]: any;
 }
 
-/**
- * PRESENTATION layer: a versioned PRD projected from the Belief Graph. Carries
- * the rollup it was generated at and whether the confidence gate was overridden.
- */
 export class ProductDefinition extends BaseEntity {
   id: number;
   projectId: number;

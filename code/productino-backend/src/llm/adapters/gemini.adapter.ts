@@ -4,18 +4,13 @@ import { AdapterResult, BaseLlmAdapter } from './llm-provider.adapter';
 
 /**
  * Google Gemini adapter (Generative Language API, `:generateContent`).
- *
- * Zero-dependency over `fetch`. The system prompt maps to `systemInstruction`;
- * `assistant` messages map to Gemini's `model` role. JSON output is requested
- * via `responseMimeType: application/json` (shape is enforced by the caller's
- * validate/repair loop).
  */
 @Injectable()
 export class GeminiAdapter extends BaseLlmAdapter {
   readonly providers = ['gemini', 'google'];
 
   async generate(config: ResolvedLlmConfig, req: LlmRequest): Promise<AdapterResult> {
-    const base = this.trimSlash(config.baseUrl || 'https://generativelanguage.googleapis.com');
+    const baseUrl = this.trimSlash(config.baseUrl || 'https://generativelanguage.googleapis.com');
 
     const systemParts: string[] = [];
     const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
@@ -43,7 +38,7 @@ export class GeminiAdapter extends BaseLlmAdapter {
     if (systemParts.length) body.systemInstruction = { parts: [{ text: systemParts.join('\n\n') }] };
 
     const data = await this.postJson(
-      `${base}/v1beta/models/${config.model}:generateContent`,
+      `${baseUrl}/v1beta/models/${config.model}:generateContent`,
       { 'content-type': 'application/json', 'x-goog-api-key': config.apiKey },
       body,
     );

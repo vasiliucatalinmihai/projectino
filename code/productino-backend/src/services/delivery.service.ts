@@ -16,7 +16,7 @@ import {
   GenerateEpicsSchema,
   StructuredLlmService,
 } from '../llm';
-import { pLimit } from '../common/concurrency';
+import { createConcurrencyLimiter } from '../common/concurrency';
 import { ProjectService } from './project.service';
 import { PipelineResetService } from './pipeline-reset.service';
 
@@ -95,7 +95,7 @@ export class DeliveryService {
 
     // 1) Epics (flat — one shallow call).
     const { epics } = await this.structured.run({
-      key: PromptKey.GENERATE_EPICS,
+      promptKey: PromptKey.GENERATE_EPICS,
       vars: { summary: prd.summary, inScope: prd.inScope, userStories: prd.userStories },
       schema: GenerateEpicsSchema,
       accountId: user.accountId,
@@ -127,7 +127,7 @@ export class DeliveryService {
     // 2) Stories + tasks per epic, capped at 3 concurrent so a burst of calls
     //    doesn't trip provider rate limits. A failed epic plan is skipped, not
     //    fatal, so one flaky call doesn't lose the whole plan.
-    const limit = pLimit(3);
+    const limit = createConcurrencyLimiter(3);
     await Promise.all(
       epicRows.map(({ row, epic }) =>
         limit(() => this.planEpic(project.id, user.accountId, prd, row, epic).catch(() => undefined)),
@@ -160,7 +160,7 @@ export class DeliveryService {
   ): Promise<void> {
     // 1) Decompose into stories + tasks (no numbers).
     const { stories } = await this.structured.run({
-      key: PromptKey.GENERATE_EPIC_PLAN,
+      promptKey: PromptKey.GENERATE_EPIC_PLAN,
       vars: {
         summary: prd.summary,
         nonFunctional: prd.nonFunctional,
@@ -244,7 +244,7 @@ export class DeliveryService {
 
     try {
       const { estimates } = await this.structured.run({
-        key: PromptKey.ESTIMATE_EPIC,
+        promptKey: PromptKey.ESTIMATE_EPIC,
         vars: {
           summary: prd.summary,
           nonFunctional: prd.nonFunctional,

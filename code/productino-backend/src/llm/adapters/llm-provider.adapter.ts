@@ -7,11 +7,6 @@ export interface AdapterResult {
   finishReason?: string | null;
 }
 
-/**
- * One concrete provider integration. `providers` lists the provider keys this
- * adapter answers for (e.g. the OpenAI adapter also serves OpenAI-compatible
- * `deepseek`). `LlmService` builds a provider → adapter map from these.
- */
 export interface LlmProviderAdapter {
   readonly providers: string[];
   generate(config: ResolvedLlmConfig, req: LlmRequest): Promise<AdapterResult>;
@@ -20,40 +15,30 @@ export interface LlmProviderAdapter {
 const TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 60_000;
 const MAX_RETRIES = Number(process.env.LLM_MAX_RETRIES ?? 2);
 
-/** Shared HTTP plumbing for fetch-based adapters: timeout + transient-retry. */
+/** Shared HTTP for fetch-based adapters: timeout + retry. */
 export abstract class BaseLlmAdapter implements LlmProviderAdapter {
   abstract readonly providers: string[];
   abstract generate(config: ResolvedLlmConfig, req: LlmRequest): Promise<AdapterResult>;
 
-  /** Drop a trailing slash so a path can be appended safely. */
   protected trimSlash(url: string): string {
     return url.replace(/\/+$/, '');
   }
 
-  protected async postJson(
-    url: string,
-    headers: Record<string, string>,
-    body: unknown,
-  ): Promise<any> {
+  protected async postJson(url: string, headers: Record<string, string>, body: unknown): Promise<any> {
     for (let attempt = 1; ; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-      let res: Response;
+      let response: Response;
       try {
-        res = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-      } catch (e: any) {
+        response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal});
+      } catch (exception: any) {
         clearTimeout(timer);
-        const timedOut = e?.name === 'AbortError';
+        const timedOut = exception?.name === 'AbortError';
         const error = new LlmProviderError(
           timedOut
             ? `Request to ${url} timed out after ${TIMEOUT_MS}ms`
-            : `Network error calling ${url}: ${e?.message ?? e}`,
+            : `Network error calling ${url}: ${exception?.message ?? exception}`,
           { retryable: true },
         );
         if (attempt <= MAX_RETRIES) {
@@ -64,11 +49,11 @@ export abstract class BaseLlmAdapter implements LlmProviderAdapter {
       }
       clearTimeout(timer);
 
-      const raw = await res.text();
-      if (!res.ok) {
-        const retryAfter = this.parseRetryAfter(res.headers.get('retry-after'));
-        const error = new LlmProviderError(`Provider returned ${res.status}: ${raw.slice(0, 800)}`, {
-          status: res.status,
+      const rawResponse = await response.text();
+      if (!response.ok) {
+        const retryAfter = this.parseRetryAfter(response.headers.get('retry-after'));
+        const error = new LlmProviderError(`Provider returned ${response.status}: ${rawResponse.slice(0, 800)}`, {
+          status: response.status,
           retryAfter,
         });
         if (error.retryable && attempt <= MAX_RETRIES) {
@@ -79,9 +64,9 @@ export abstract class BaseLlmAdapter implements LlmProviderAdapter {
       }
 
       try {
-        return JSON.parse(raw);
+        return JSON.parse(rawResponse);
       } catch {
-        throw new LlmProviderError(`Provider returned a non-JSON body: ${raw.slice(0, 300)}`);
+        throw new LlmProviderError(`Provider returned a non-JSON body: ${rawResponse.slice(0, 300)}`);
       }
     }
   }

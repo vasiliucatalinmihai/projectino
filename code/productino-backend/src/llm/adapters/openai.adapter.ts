@@ -4,11 +4,6 @@ import { AdapterResult, BaseLlmAdapter } from './llm-provider.adapter';
 
 /**
  * OpenAI Chat Completions adapter (`POST /chat/completions`).
- *
- * The base for OpenAI-compatible providers: subclass it and override
- * `providers` + `defaultBaseUrl()` to add one (see DeepSeekAdapter). Any
- * OpenAI-compatible endpoint also works on this adapter directly by setting an
- * explicit `baseUrl` on the model.
  */
 @Injectable()
 export class OpenAiAdapter extends BaseLlmAdapter {
@@ -20,7 +15,7 @@ export class OpenAiAdapter extends BaseLlmAdapter {
   }
 
   async generate(config: ResolvedLlmConfig, req: LlmRequest): Promise<AdapterResult> {
-    const base = this.trimSlash(config.baseUrl || this.defaultBaseUrl());
+    const baseUrl = this.trimSlash(config.baseUrl || this.defaultBaseUrl());
 
     const messages: Array<{ role: string; content: string }> = [];
     if (req.system) messages.push({ role: 'system', content: req.system });
@@ -37,7 +32,7 @@ export class OpenAiAdapter extends BaseLlmAdapter {
     if (req.json) body.response_format = { type: 'json_object' };
 
     const data = await this.postJson(
-      `${base}/chat/completions`,
+      `${baseUrl}/chat/completions`,
       {
         'content-type': 'application/json',
         authorization: `Bearer ${config.apiKey}`,

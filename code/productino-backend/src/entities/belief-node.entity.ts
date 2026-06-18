@@ -12,12 +12,6 @@ export interface Provenance {
   match?: 'exact' | 'normalized' | 'fuzzy' | 'none';
 }
 
-/**
- * UNDERSTANDING layer. One polymorphic belief, wearing the epistemic envelope:
- * how sure we are (`confidence`), where it stands (`status`), and why
- * (`provenance`). `kind` sub-types a REQUIREMENT; `extra` holds type-specific
- * fields (e.g. risk severity/probability) without new columns.
- */
 export class BeliefNode extends BaseEntity {
   id: number;
   projectId: number;

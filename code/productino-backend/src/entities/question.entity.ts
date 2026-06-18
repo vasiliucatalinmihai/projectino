@@ -1,11 +1,6 @@
 import { QuestionImpact, QuestionStatus } from '@prisma/client';
 import { BaseEntity } from './base.entity';
 
-/**
- * A clarifying question with its proposed default answer. Proposed (OPEN),
- * curated in/out (INCLUDED/EXCLUDED), then ANSWERED once the client replies —
- * the answer is folded back into a new round.
- */
 export class Question extends BaseEntity {
   id: number;
   projectId: number;

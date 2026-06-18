@@ -39,7 +39,7 @@ export class ExtractionService {
     const source = await this.resolveSource(projectId, sourceId);
 
     const { beliefs } = await this.structured.run({
-      key: PromptKey.EXTRACT_BELIEFS,
+      promptKey: PromptKey.EXTRACT_BELIEFS,
       vars: {
         source: source.content,
         sourceKind: source.kind,

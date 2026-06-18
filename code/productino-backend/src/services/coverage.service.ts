@@ -42,7 +42,7 @@ export class CoverageService {
     const rubric = this.rubric.forProject(project);
 
     const result = await this.structured.run({
-      key: PromptKey.SCORE_COVERAGE,
+      promptKey: PromptKey.SCORE_COVERAGE,
       vars: { rubricList: this.rubric.promptList(rubric), beliefsList: this.beliefsList(nodes, rubric) },
       schema: ScoreCoverageSchema,
       accountId: user.accountId,

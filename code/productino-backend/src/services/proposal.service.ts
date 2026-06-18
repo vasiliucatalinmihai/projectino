@@ -177,7 +177,7 @@ export class ProposalService {
     try {
       // Prose is optional — a failed/invalid generation still yields a fully-priced proposal.
       return await this.structured.run({
-        key: PromptKey.SYNTHESIZE_PROPOSAL,
+        promptKey: PromptKey.SYNTHESIZE_PROPOSAL,
         vars: {
           projectName: project.name,
           clientName: project.client?.name ?? 'the client',

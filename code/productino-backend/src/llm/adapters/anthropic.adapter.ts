@@ -10,20 +10,13 @@ const TEMPERATURE_DEPRECATED = /claude-(opus|sonnet|haiku)-4|claude-4/i;
 
 /**
  * Anthropic Messages API adapter (`POST /v1/messages`).
- *
- * Zero-dependency over `fetch`. Two upgrades over plain text generation:
- *  - **Strict structured output** via tool-use: when `req.responseSchema` is set,
- *    a tool with that JSON Schema is forced and the parsed `tool_use.input` is
- *    returned (no JSON-from-prose parsing).
- *  - **Prompt caching**: the system block is marked `cache_control: ephemeral`
- *    so a reused prefix isn't re-billed (Anthropic caches ≥1024-token prefixes).
  */
 @Injectable()
 export class AnthropicAdapter extends BaseLlmAdapter {
   readonly providers = ['anthropic'];
 
   async generate(config: ResolvedLlmConfig, req: LlmRequest): Promise<AdapterResult> {
-    const base = this.trimSlash(config.baseUrl || 'https://api.anthropic.com');
+    const baseUrl = this.trimSlash(config.baseUrl || 'https://api.anthropic.com');
 
     // Anthropic takes `system` at the top level; fold any system-role messages in.
     const messages: Array<{ role: string; content: string }> = [];
@@ -32,7 +25,7 @@ export class AnthropicAdapter extends BaseLlmAdapter {
       if (message.role === 'system') systemParts.push(message.content);
       else messages.push({ role: message.role, content: message.content });
     }
-    // With tool-use we don't need a "respond in JSON" nudge.
+    //ensure json response
     if (req.json && !req.responseSchema) {
       systemParts.push('Respond with only a single valid JSON object and no other text.');
     }
@@ -40,13 +33,11 @@ export class AnthropicAdapter extends BaseLlmAdapter {
     const body: Record<string, any> = {
       ...config.options,
       ...(req.options ?? {}),
-      // Managed fields are set last so stored options can't clobber them.
       model: config.model,
       max_tokens: req.maxTokens ?? config.options?.max_tokens ?? req.options?.max_tokens ?? 4096,
       messages,
     };
 
-    // Strict structured output: force a single tool call shaped by the schema.
     if (req.responseSchema) {
       body.tools = [
         {
@@ -72,7 +63,7 @@ export class AnthropicAdapter extends BaseLlmAdapter {
     }
 
     const data = await this.postJson(
-      `${base}/v1/messages`,
+      `${baseUrl}/v1/messages`,
       {
         'content-type': 'application/json',
         'x-api-key': config.apiKey,

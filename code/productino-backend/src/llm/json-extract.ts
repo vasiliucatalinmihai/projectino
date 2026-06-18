@@ -1,7 +1,7 @@
 /**
  * Tolerant JSON extraction from a model's text response. Models wrap JSON in
  * ``` fences, add prose around it, or emit a leading array — this pulls out the
- * outermost JSON value and parses it. Previously duplicated in every service.
+ * outermost JSON value and parses it.
  */
 export interface JsonExtract {
   ok: boolean;

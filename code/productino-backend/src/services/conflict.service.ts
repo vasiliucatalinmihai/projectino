@@ -32,7 +32,7 @@ export class ConflictService {
 
     const nodeNames = nodes.map((node) => node.name);
     const { conflicts } = await this.structured.run({
-      key: PromptKey.DETECT_CONFLICTS,
+      promptKey: PromptKey.DETECT_CONFLICTS,
       vars: { beliefsList: this.beliefsList(nodes) },
       schema: DetectConflictsSchema,
       accountId: user.accountId,
