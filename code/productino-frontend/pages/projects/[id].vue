@@ -152,17 +152,13 @@ async function resetRubric() {
   }
 }
 
-const details = computed(() => [
-  { label: 'ID', value: project.value?.id },
-  { label: 'Client', value: project.value?.clientName },
-  { label: 'Stage', value: project.value?.stage, mono: true },
-]);
-
-// Each main section collapses independently (header toggles; body in v-show).
-const beliefOpen = ref(false);
-const definitionOpen = ref(false);
-const deliveryOpen = ref(false);
-const proposalOpen = ref(false);
+// The four artifact sections are a single-select deck: only the chosen one
+// renders below the cards (null = none shown).
+type SectionKey = 'belief' | 'definition' | 'delivery' | 'proposal';
+const activeSection = ref<SectionKey | null>(null);
+function selectSection(key: SectionKey) {
+  activeSection.value = activeSection.value === key ? null : key;
+}
 
 // --- edit ---
 const showForm = ref(false);
@@ -764,6 +760,82 @@ function daysRange(lo: number, hi: number): string {
 watch([graph, definition, delivery, proposal], () => {
   refreshUsage();
 });
+
+// --- pipeline orientation: the stage rail + next-step guidance ---
+const GATE = 0.7; // mirrors DEFINITION_GATE on the backend
+
+// The canonical stage machine (Project.stage), used as the page's spine. Several
+// early stages live in the Belief Graph section, so they share its anchor.
+const STAGE_RAIL = [
+  { key: 'BRIEFING', label: 'Briefing', glyph: '✎', anchor: 'stage-belief' },
+  { key: 'GAP_ANALYSIS', label: 'Gap analysis', glyph: '▤', anchor: 'stage-belief' },
+  { key: 'AWAITING_CLIENT', label: 'Awaiting client', glyph: '↺', anchor: 'stage-belief' },
+  { key: 'DEFINITION', label: 'Definition', glyph: '§', anchor: 'stage-definition' },
+  { key: 'PLANNING', label: 'Planning', glyph: '☷', anchor: 'stage-delivery' },
+  { key: 'DELIVERY', label: 'Delivery', glyph: '⚑', anchor: 'stage-delivery' },
+];
+const stageIndex = computed(() =>
+  Math.max(0, STAGE_RAIL.findIndex((s) => s.key === (project.value?.stage ?? 'BRIEFING'))),
+);
+function railState(i: number): 'done' | 'current' | 'todo' {
+  if (i < stageIndex.value) return 'done';
+  if (i === stageIndex.value) return 'current';
+  return 'todo';
+}
+
+const rollup = computed(() => graph.value?.rollupConfidence ?? 0);
+const hasRounds = computed(() => (graph.value?.rounds?.length ?? 0) > 0);
+const gatePassed = computed(() => hasRounds.value && rollup.value >= GATE);
+
+interface NextStep {
+  label: string;
+  detail: string;
+  kind: 'run' | 'edit' | 'scroll';
+  fn?: () => Promise<void> | void;
+  busy?: () => boolean;
+  anchor?: string;
+}
+// The single most useful action right now, derived from where the project is.
+const nextStep = computed<NextStep | null>(() => {
+  if (!project.value) return null;
+  if (!project.value.briefing)
+    return { label: 'Add a briefing', detail: 'Paste the client brief or transcript to seed the graph.', kind: 'edit' };
+  if (!graph.value?.nodes?.length)
+    return { label: 'Extract beliefs', detail: 'Turn the briefing into a traceable, typed belief set.', kind: 'run', fn: extract, busy: () => extracting.value };
+  if (!hasRounds.value)
+    return { label: 'Score coverage', detail: 'Score the graph against the rubric and surface the gaps.', kind: 'run', fn: score, busy: () => scoring.value };
+  if (!gatePassed.value) {
+    const open = (graph.value?.questions ?? []).filter((q) => q.status !== 'ANSWERED').length;
+    return {
+      label: 'Converge with the client',
+      detail: `Confidence ${pct(rollup.value)}% is below the ${pct(GATE)}% gate. Export the ${open} open question${open === 1 ? '' : 's'}, then paste the reply.`,
+      kind: 'scroll',
+      anchor: 'stage-belief',
+    };
+  }
+  if (!definition.value)
+    return { label: 'Generate the PRD', detail: `Confidence ${pct(rollup.value)}% clears the ${pct(GATE)}% gate — project the graph into a definition.`, kind: 'run', fn: generateDefinition, busy: () => generating.value };
+  if (!delivery.value?.epics?.length)
+    return { label: 'Plan delivery', detail: 'Break the PRD into epics, stories and estimated tasks.', kind: 'run', fn: generateDelivery, busy: () => planning.value };
+  if (!proposal.value)
+    return { label: 'Draft the proposal', detail: 'Turn the plan into a priced, phased proposal.', kind: 'run', fn: generateProposal, busy: () => proposing.value };
+  return null;
+});
+
+// Rail click: select the matching deck section and scroll to it.
+const ANCHOR_SECTION: Record<string, SectionKey> = {
+  'stage-belief': 'belief',
+  'stage-definition': 'definition',
+  'stage-delivery': 'delivery',
+  'stage-proposal': 'proposal',
+};
+function goToStage(anchor: string) {
+  const key = ANCHOR_SECTION[anchor];
+  if (key) activeSection.value = key;
+  if (import.meta.client) {
+    nextTick(() => document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+}
 </script>
 
 <template>
@@ -773,50 +845,101 @@ watch([graph, definition, delivery, proposal], () => {
     <p v-if="error || !project" class="mt-4 text-sm text-neutral-500">Project not found.</p>
 
     <template v-else>
-      <div class="mb-5 mt-2 flex items-start justify-between">
-        <div>
+      <!-- command bar -->
+      <div class="mb-5 mt-2 flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
           <div class="kicker">// project</div>
-          <h1 class="m-0 text-2xl font-bold tracking-tight text-white">{{ project.name }}</h1>
-          <NuxtLink
-            v-if="project.clientName"
-            :to="`/clients/${project.clientId}`"
-            class="text-sm text-neutral-400 hover:text-brand"
-          >
-            {{ project.clientName }} →
-          </NuxtLink>
+          <h1 class="m-0 flex items-baseline gap-2.5 text-2xl font-bold tracking-tight text-white">
+            {{ project.name }}
+            <span class="font-mono text-[11px] font-normal text-neutral-600">#{{ project.id }}</span>
+          </h1>
+          <div class="mt-1 flex items-center gap-2 text-sm">
+            <NuxtLink
+              v-if="project.clientName"
+              :to="`/clients/${project.clientId}`"
+              class="text-neutral-400 hover:text-brand"
+            >
+              {{ project.clientName }}
+            </NuxtLink>
+            <span v-if="project.clientName" class="text-neutral-700">·</span>
+            <span class="font-mono text-xs uppercase tracking-wide text-neutral-500">{{ project.stage.replace('_', ' ') }}</span>
+          </div>
         </div>
-        <div v-if="canManage" class="flex gap-2">
+        <div v-if="canManage" class="flex shrink-0 gap-2">
           <button class="btn-ghost text-red-400" @click="remove">Delete</button>
           <button class="btn-primary" @click="openEdit">Edit</button>
         </div>
       </div>
 
-      <div class="rounded-xl border border-neutral-800 bg-neutral-900 p-5">
-        <DetailList :items="details" />
-      </div>
-
-      <!-- token usage -->
-      <Collapsible
-        v-if="usage && usage.runs"
-        title="// token usage"
-        :count="`${formatInt(usage.totalTokens)} tokens`"
-        class="mt-4"
-      >
-        <p class="mb-3 text-sm text-neutral-300">
-          <span class="font-mono font-bold text-brand">{{ formatInt(usage.totalTokens) }}</span> tokens
-          <span class="text-neutral-500">({{ formatInt(usage.tokensIn) }} in · {{ formatInt(usage.tokensOut) }} out) over {{ usage.runs }} LLM runs</span>
-        </p>
-        <div class="flex flex-col gap-1">
-          <div
-            v-for="p in usageByPrompt"
-            :key="p.promptKey"
-            class="flex items-center justify-between gap-3 text-xs"
-          >
-            <span class="font-mono text-neutral-400">{{ p.promptKey }}</span>
-            <span class="text-neutral-500">{{ formatInt(p.totalTokens) }} · {{ p.runs }} runs</span>
-          </div>
+      <!-- pipeline rail — the convergence spine; click a stage to jump to it -->
+      <nav class="overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-900/60 px-3 py-4" aria-label="Pipeline stages">
+        <div class="flex min-w-[560px] items-start">
+          <template v-for="(s, i) in STAGE_RAIL" :key="s.key">
+            <button
+              type="button"
+              class="group flex min-w-[84px] flex-col items-center gap-1.5"
+              :title="`Go to ${s.label}`"
+              @click="goToStage(s.anchor)"
+            >
+              <span
+                class="flex h-9 w-9 items-center justify-center rounded-full border font-mono text-sm transition-colors"
+                :class="{
+                  'border-brand bg-brand text-neutral-950': railState(i) === 'done',
+                  'rail-current border-brand text-brand': railState(i) === 'current',
+                  'border-neutral-700 text-neutral-600 group-hover:border-neutral-600': railState(i) === 'todo',
+                }"
+              >{{ railState(i) === 'done' ? '✓' : s.glyph }}</span>
+              <span class="text-center text-[11px] font-medium leading-tight" :class="railState(i) === 'todo' ? 'text-neutral-600' : 'text-neutral-300'">
+                {{ s.label }}
+              </span>
+              <span
+                v-if="s.key === 'GAP_ANALYSIS' && hasRounds"
+                class="font-mono text-[10px] font-bold"
+                :class="gatePassed ? 'text-brand' : 'text-amber-300'"
+              >{{ pct(rollup) }}%</span>
+            </button>
+            <span
+              v-if="i < STAGE_RAIL.length - 1"
+              class="mt-[17px] h-px flex-1"
+              :class="i < stageIndex ? 'bg-brand/50' : 'bg-neutral-800'"
+            />
+          </template>
         </div>
-      </Collapsible>
+      </nav>
+
+      <!-- next step — the one action that moves the project forward -->
+      <div
+        v-if="nextStep"
+        class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand/30 bg-brand/[0.06] p-4"
+      >
+        <div class="min-w-0">
+          <div class="kicker text-brand">// next step</div>
+          <p class="mt-1 text-sm font-semibold text-white">{{ nextStep.label }}</p>
+          <p class="mt-0.5 text-sm text-neutral-400">{{ nextStep.detail }}</p>
+        </div>
+        <div class="shrink-0">
+          <button
+            v-if="nextStep.kind === 'run' && canRun"
+            class="btn-primary"
+            :disabled="nextStep.busy?.()"
+            @click="nextStep.fn?.()"
+          >
+            {{ nextStep.busy?.() ? 'Working…' : nextStep.label }}
+          </button>
+          <button v-else-if="nextStep.kind === 'edit' && canManage" class="btn-primary" @click="openEdit">
+            {{ nextStep.label }}
+          </button>
+          <button v-else-if="nextStep.kind === 'scroll'" class="btn-ghost" @click="goToStage(nextStep.anchor!)">
+            Go to questions
+          </button>
+        </div>
+      </div>
+      <div
+        v-else
+        class="mt-4 flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400"
+      >
+        <span class="text-brand">✓</span> Fully defined — PRD, plan and proposal are all generated.
+      </div>
 
       <!-- discovery rubric -->
       <Collapsible
@@ -884,41 +1007,74 @@ watch([graph, definition, delivery, proposal], () => {
         </div>
       </Collapsible>
 
-      <!-- Belief graph -->
-      <div class="mt-8">
-        <div class="flex cursor-pointer items-center justify-between gap-3" @click="beliefOpen = !beliefOpen">
-          <div class="flex items-center gap-3">
-            <span class="text-neutral-600 transition-transform duration-150" :class="beliefOpen ? 'rotate-90' : ''">▸</span>
+      <!-- token usage -->
+      <Collapsible
+        v-if="usage && usage.runs"
+        title="// token usage"
+        :count="`${formatInt(usage.totalTokens)} tokens`"
+        class="mt-4"
+      >
+        <p class="mb-3 text-sm text-neutral-300">
+          <span class="font-mono font-bold text-brand">{{ formatInt(usage.totalTokens) }}</span> tokens
+          <span class="text-neutral-500">({{ formatInt(usage.tokensIn) }} in · {{ formatInt(usage.tokensOut) }} out) over {{ usage.runs }} LLM runs</span>
+        </p>
+        <div class="flex flex-col gap-1">
+          <div
+            v-for="p in usageByPrompt"
+            :key="p.promptKey"
+            class="flex items-center justify-between gap-3 text-xs"
+          >
+            <span class="font-mono text-neutral-400">{{ p.promptKey }}</span>
+            <span class="text-neutral-500">{{ formatInt(p.totalTokens) }} · {{ p.runs }} runs</span>
+          </div>
+        </div>
+      </Collapsible>
+
+      <!-- stage deck — pick an artifact to view and work on; only the active one opens below -->
+      <div class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <!-- Belief Graph -->
+        <div
+          class="cursor-pointer rounded-xl border bg-neutral-900 p-4 transition-colors"
+          :class="activeSection === 'belief' ? 'border-brand ring-1 ring-brand/30' : 'border-neutral-800 hover:border-neutral-700'"
+          @click="selectSection('belief')"
+        >
+          <div class="flex items-start justify-between gap-2">
             <div>
               <div class="kicker">// belief graph</div>
-              <h2 class="m-0 text-xl font-bold tracking-tight text-white">Belief Graph</h2>
+              <h3 class="m-0 mt-0.5 text-base font-semibold text-white">Belief Graph</h3>
             </div>
+            <span class="shrink-0 transition-transform" :class="activeSection === 'belief' ? 'rotate-90 text-brand' : 'text-neutral-600'">▸</span>
           </div>
-          <div class="flex items-center gap-4" @click.stop>
-            <div v-if="(graph?.rounds?.length ?? 0) > 0" class="text-right">
-              <div class="flex items-end justify-end gap-2">
-                <span class="font-mono text-3xl font-bold text-brand">{{ pct(graph?.rollupConfidence ?? 0) }}%</span>
-                <span class="pb-1 text-xs uppercase tracking-wider text-neutral-500">confidence</span>
+          <div class="mt-2 min-h-[1.75rem]">
+            <template v-if="(graph?.rounds?.length ?? 0) > 0">
+              <div class="flex items-baseline gap-2">
+                <span class="font-mono text-2xl font-bold text-brand">{{ pct(graph?.rollupConfidence ?? 0) }}%</span>
+                <span class="text-[11px] uppercase tracking-wider text-neutral-500">confidence</span>
               </div>
               <p v-if="(graph?.rounds?.length ?? 0) > 1" class="mt-0.5 font-mono text-[11px] text-neutral-500">{{ roundsDelta }}</p>
-            </div>
+            </template>
+            <p v-else class="text-sm text-neutral-500">
+              {{ graph?.nodes?.length ? `${graph.nodes.length} beliefs · not scored` : 'Not started' }}
+            </p>
+          </div>
+          <div v-if="canRun || canReset" class="mt-3 flex flex-wrap gap-2" @click.stop>
             <button
               v-if="canRun"
-              class="btn-ghost"
+              class="btn-ghost text-xs"
               :disabled="extracting || scoring || !project.briefing"
               :title="!project.briefing ? 'Add a briefing first' : ''"
               @click="extract"
             >
-              {{ extracting ? 'Extracting…' : (graph?.nodes?.length ? 'Re-extract' : 'Extract beliefs') }}
+              {{ extracting ? 'Extracting…' : graph?.nodes?.length ? 'Re-extract' : 'Extract' }}
             </button>
             <button
               v-if="canRun"
-              class="btn-primary"
+              class="btn-primary text-xs"
               :disabled="scoring || extracting || !(graph?.nodes?.length)"
               :title="!(graph?.nodes?.length) ? 'Extract beliefs first' : ''"
               @click="score"
             >
-              {{ scoring ? 'Scoring…' : (graph?.rounds?.length ? 'Re-score' : 'Score coverage') }}
+              {{ scoring ? 'Scoring…' : graph?.rounds?.length ? 'Re-score' : 'Score' }}
             </button>
             <button
               v-if="canReset && (graph?.nodes?.length || (graph?.rounds?.length ?? 0) > 0)"
@@ -930,7 +1086,116 @@ watch([graph, definition, delivery, proposal], () => {
           </div>
         </div>
 
-        <div v-show="beliefOpen" class="mt-5 flex flex-col gap-5">
+        <!-- Product Definition -->
+        <div
+          class="cursor-pointer rounded-xl border bg-neutral-900 p-4 transition-colors"
+          :class="activeSection === 'definition' ? 'border-brand ring-1 ring-brand/30' : 'border-neutral-800 hover:border-neutral-700'"
+          @click="selectSection('definition')"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="kicker">// product definition</div>
+              <h3 class="m-0 mt-0.5 text-base font-semibold text-white">Product Definition</h3>
+            </div>
+            <span class="shrink-0 transition-transform" :class="activeSection === 'definition' ? 'rotate-90 text-brand' : 'text-neutral-600'">▸</span>
+          </div>
+          <div class="mt-2 min-h-[1.75rem]">
+            <p v-if="definition" class="text-sm text-neutral-300">
+              <span class="font-mono font-bold text-brand">v{{ definition.version }}</span>
+              <span v-if="definition.gateOverride" class="ml-1 text-[11px] text-amber-300">· gate overridden</span>
+            </p>
+            <p v-else class="text-sm text-neutral-500">{{ graph?.rounds?.length ? 'Not generated' : 'Score coverage first' }}</p>
+          </div>
+          <div v-if="canRun || canReset" class="mt-3 flex flex-wrap gap-2" @click.stop>
+            <button
+              v-if="canRun"
+              class="btn-primary text-xs"
+              :disabled="generating || !(graph?.rounds?.length)"
+              :title="!(graph?.rounds?.length) ? 'Score coverage first' : ''"
+              @click="generateDefinition"
+            >
+              {{ generating ? 'Generating…' : definition ? 'Regenerate' : 'Generate PRD' }}
+            </button>
+            <button v-if="canReset && definition" class="btn-ghost text-xs text-red-400" @click="resetPipeline('definition')">Reset</button>
+          </div>
+        </div>
+
+        <!-- Delivery Plan -->
+        <div
+          class="cursor-pointer rounded-xl border bg-neutral-900 p-4 transition-colors"
+          :class="activeSection === 'delivery' ? 'border-brand ring-1 ring-brand/30' : 'border-neutral-800 hover:border-neutral-700'"
+          @click="selectSection('delivery')"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="kicker">// delivery plan</div>
+              <h3 class="m-0 mt-0.5 text-base font-semibold text-white">Delivery Plan</h3>
+            </div>
+            <span class="shrink-0 transition-transform" :class="activeSection === 'delivery' ? 'rotate-90 text-brand' : 'text-neutral-600'">▸</span>
+          </div>
+          <div class="mt-2 min-h-[1.75rem]">
+            <div v-if="delivery?.epics?.length" class="flex items-baseline gap-2">
+              <span class="font-mono text-2xl font-bold text-brand">{{ estLabel(delivery.totalLow, delivery.totalHigh) }}</span>
+              <span class="text-[11px] uppercase tracking-wider text-neutral-500">estimate</span>
+            </div>
+            <p v-else class="text-sm text-neutral-500">{{ definition ? 'Not planned' : 'Generate a PRD first' }}</p>
+          </div>
+          <div v-if="canRun || canReset" class="mt-3 flex flex-wrap gap-2" @click.stop>
+            <button
+              v-if="canRun"
+              class="btn-primary text-xs"
+              :disabled="planning || !definition"
+              :title="!definition ? 'Generate a PRD first' : ''"
+              @click="generateDelivery"
+            >
+              {{ planning ? 'Planning…' : delivery?.epics?.length ? 'Regenerate' : 'Generate plan' }}
+            </button>
+            <button v-if="canReset && delivery?.epics?.length" class="btn-ghost text-xs text-red-400" @click="resetPipeline('delivery')">Reset</button>
+          </div>
+        </div>
+
+        <!-- Proposal -->
+        <div
+          class="cursor-pointer rounded-xl border bg-neutral-900 p-4 transition-colors"
+          :class="activeSection === 'proposal' ? 'border-brand ring-1 ring-brand/30' : 'border-neutral-800 hover:border-neutral-700'"
+          @click="selectSection('proposal')"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="kicker">// proposal</div>
+              <h3 class="m-0 mt-0.5 text-base font-semibold text-white">Proposal</h3>
+            </div>
+            <span class="shrink-0 transition-transform" :class="activeSection === 'proposal' ? 'rotate-90 text-brand' : 'text-neutral-600'">▸</span>
+          </div>
+          <div class="mt-2 min-h-[1.75rem]">
+            <p v-if="proposal" class="font-mono text-sm font-bold text-brand">
+              {{ money(proposal.content.totalLowCost, proposal.content.currency) }}–{{ money(proposal.content.totalHighCost, proposal.content.currency) }}
+            </p>
+            <p v-else class="text-sm text-neutral-500">{{ delivery?.epics?.length ? 'Not drafted' : 'Plan delivery first' }}</p>
+          </div>
+          <div v-if="canRun || canReset || proposal" class="mt-3 flex flex-wrap gap-2" @click.stop>
+            <button v-if="proposal" class="btn-ghost text-xs" @click="exportProposal">Export</button>
+            <button
+              v-if="canRun"
+              class="btn-primary text-xs"
+              :disabled="proposing || !(delivery?.epics?.length)"
+              :title="!(delivery?.epics?.length) ? 'Generate a delivery plan first' : ''"
+              @click="generateProposal"
+            >
+              {{ proposing ? 'Pricing…' : proposal ? 'Regenerate' : 'Generate' }}
+            </button>
+            <button v-if="canReset && proposal" class="btn-ghost text-xs text-red-400" @click="resetPipeline('proposal')">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <p v-if="!activeSection" class="mt-5 text-center text-sm text-neutral-600">
+        Select a stage above to open it.
+      </p>
+
+      <!-- Belief graph -->
+      <div v-show="activeSection === 'belief'" id="stage-belief" class="mt-6 scroll-mt-4">
+        <div class="flex flex-col gap-5">
           <p v-if="extractError" class="text-sm text-red-400">{{ extractError }}</p>
 
         <!-- sources (evidence layer) — one collapsible per round of input -->
@@ -1141,36 +1406,8 @@ watch([graph, definition, delivery, proposal], () => {
       </div>
 
       <!-- product definition (PRD) -->
-      <div class="mt-8">
-        <div class="flex cursor-pointer items-center justify-between gap-3" @click="definitionOpen = !definitionOpen">
-          <div class="flex items-center gap-3">
-            <span class="text-neutral-600 transition-transform duration-150" :class="definitionOpen ? 'rotate-90' : ''">▸</span>
-            <div>
-              <div class="kicker">// product definition</div>
-              <h2 class="m-0 text-xl font-bold tracking-tight text-white">Product Definition</h2>
-            </div>
-          </div>
-          <div class="flex items-center gap-3" @click.stop>
-            <button
-              v-if="canRun"
-              class="btn-primary"
-              :disabled="generating || !(graph?.rounds?.length)"
-              :title="!(graph?.rounds?.length) ? 'Score coverage first' : ''"
-              @click="generateDefinition"
-            >
-              {{ generating ? 'Generating…' : definition ? 'Regenerate PRD' : 'Generate PRD' }}
-            </button>
-            <button
-              v-if="canReset && definition"
-              class="btn-ghost text-xs text-red-400"
-              @click="resetPipeline('definition')"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-
-        <div v-show="definitionOpen" class="mt-5 flex flex-col gap-5">
+      <div v-show="activeSection === 'definition'" id="stage-definition" class="mt-6 scroll-mt-4">
+        <div class="flex flex-col gap-5">
 
         <div
           v-if="!definition"
@@ -1266,40 +1503,8 @@ watch([graph, definition, delivery, proposal], () => {
       </div>
 
       <!-- delivery plan -->
-      <div class="mt-8">
-        <div class="flex cursor-pointer items-center justify-between gap-3" @click="deliveryOpen = !deliveryOpen">
-          <div class="flex items-center gap-3">
-            <span class="text-neutral-600 transition-transform duration-150" :class="deliveryOpen ? 'rotate-90' : ''">▸</span>
-            <div>
-              <div class="kicker">// delivery plan</div>
-              <h2 class="m-0 text-xl font-bold tracking-tight text-white">Delivery Plan</h2>
-            </div>
-          </div>
-          <div class="flex items-center gap-4" @click.stop>
-            <div v-if="delivery?.epics?.length" class="text-right">
-              <span class="font-mono text-3xl font-bold text-brand">{{ estLabel(delivery.totalLow, delivery.totalHigh) }}</span>
-              <p class="mt-0.5 text-xs uppercase tracking-wider text-neutral-500">estimate</p>
-            </div>
-            <button
-              v-if="canRun"
-              class="btn-primary"
-              :disabled="planning || !definition"
-              :title="!definition ? 'Generate a PRD first' : ''"
-              @click="generateDelivery"
-            >
-              {{ planning ? 'Planning…' : delivery?.epics?.length ? 'Regenerate plan' : 'Generate plan' }}
-            </button>
-            <button
-              v-if="canReset && delivery?.epics?.length"
-              class="btn-ghost text-xs text-red-400"
-              @click="resetPipeline('delivery')"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-
-        <div v-show="deliveryOpen" class="mt-5 flex flex-col gap-5">
+      <div v-show="activeSection === 'delivery'" id="stage-delivery" class="mt-6 scroll-mt-4">
+        <div class="flex flex-col gap-5">
 
         <div
           v-if="!(delivery?.epics?.length)"
@@ -1347,40 +1552,8 @@ watch([graph, definition, delivery, proposal], () => {
       </div>
 
       <!-- proposal / SOW -->
-      <div class="mt-8">
-        <div class="flex cursor-pointer items-center justify-between gap-3" @click="proposalOpen = !proposalOpen">
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span class="text-neutral-600 transition-transform duration-150" :class="proposalOpen ? 'rotate-90' : ''">▸</span>
-            <div>
-              <div class="kicker">// proposal</div>
-              <h2 class="m-0 text-xl font-bold tracking-tight text-white">Proposal</h2>
-            </div>
-            <span v-if="proposal" class="font-mono text-sm font-bold text-brand">
-              {{ money(proposal.content.totalLowCost, proposal.content.currency) }}–{{ money(proposal.content.totalHighCost, proposal.content.currency) }}
-            </span>
-          </div>
-          <div class="flex items-center gap-3" @click.stop>
-            <button v-if="proposal" class="btn-ghost text-xs" @click="exportProposal">Export</button>
-            <button
-              v-if="canRun"
-              class="btn-primary"
-              :disabled="proposing || !(delivery?.epics?.length)"
-              :title="!(delivery?.epics?.length) ? 'Generate a delivery plan first' : ''"
-              @click="generateProposal"
-            >
-              {{ proposing ? 'Pricing…' : proposal ? 'Regenerate proposal' : 'Generate proposal' }}
-            </button>
-            <button
-              v-if="canReset && proposal"
-              class="btn-ghost text-xs text-red-400"
-              @click="resetPipeline('proposal')"
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-
-        <div v-show="proposalOpen" class="mt-5 flex flex-col gap-5">
+      <div v-show="activeSection === 'proposal'" id="stage-proposal" class="mt-6 scroll-mt-4">
+        <div class="flex flex-col gap-5">
           <div
             v-if="!proposal"
             class="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/50 p-5 text-sm text-neutral-500"
@@ -1486,3 +1659,24 @@ watch([graph, definition, delivery, proposal], () => {
     </Modal>
   </div>
 </template>
+
+<style scoped>
+/* The current pipeline stage gets a soft brand halo — static under reduced motion. */
+.rail-current {
+  box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.16);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rail-current {
+    animation: railPulse 2.6s ease-in-out infinite;
+  }
+}
+@keyframes railPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(74, 222, 128, 0.26);
+  }
+}
+</style>
