@@ -12,6 +12,7 @@ interface Version {
   version: number;
   isActive: boolean;
   source: string;
+  content: string;
   notes: string | null;
   createdAt: string;
   stats: Stats;
@@ -93,6 +94,19 @@ function versionNo(versionId: number): string {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Prompt content -->
+    <h2 class="mb-2 text-sm font-semibold text-neutral-200">Prompt</h2>
+    <div class="mb-8 flex flex-col gap-2">
+      <Collapsible
+        v-for="v in prompt.versions"
+        :key="v.id"
+        :title="`v${v.version} · ${v.source}`"
+        :count="v.isActive ? 'active' : ''"
+      >
+        <pre class="m-0 max-h-[60vh] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-neutral-300">{{ v.content }}</pre>
+      </Collapsible>
     </div>
 
     <!-- Recent runs -->
