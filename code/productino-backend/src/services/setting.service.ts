@@ -2,7 +2,6 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { SettingRepository } from '../repository';
 import { Setting, User } from '../entities';
 
-// Service-level inputs (no HTTP DTOs).
 export interface CreateSettingInput {
   key: string;
   value: string;
@@ -29,7 +28,6 @@ export class SettingService {
     return setting;
   }
 
-  /** Read a setting value for an account (for use elsewhere in the app). */
   async getValue(accountId: number, key: string): Promise<string | null> {
     const setting = await this.settings.findByAccountAndKey(accountId, key);
     return setting?.value ?? null;

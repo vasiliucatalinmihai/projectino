@@ -9,41 +9,35 @@ import { PipelineResetService } from './pipeline-reset.service';
 import { GraphValidationService } from './graph-validation.service';
 import { RubricService } from './rubric.service';
 
-/** Beyond this, an "ASSUMED" belief can't claim more certainty than a default. */
+/** "ASSUMED" belief can't claim more certainty than a default. */
 const UNGROUNDED_CONFIDENCE_CAP = 0.4;
 
 type ExtractedBelief = ExtractBeliefsResult['beliefs'][number];
 
-/**
- * Phase 2: turn a project Source into structured BeliefNodes (the Understanding
- * layer). The model output is validated + normalized by ExtractBeliefsSchema via
- * StructuredLlmService; this service only resolves the source, persists nodes,
- * and cascades. Re-running for the same round replaces that round's nodes.
- */
 @Injectable()
 export class ExtractionService {
   constructor(
-    private readonly projects: ProjectService,
-    private readonly projectRepo: ProjectRepository,
-    private readonly sources: SourceRepository,
-    private readonly nodes: BeliefNodeRepository,
-    private readonly structured: StructuredLlmService,
-    private readonly reset: PipelineResetService,
+    private readonly projectService: ProjectService,
+    private readonly projectRepository: ProjectRepository,
+    private readonly sourceRepository: SourceRepository,
+    private readonly beliefNodeRepository: BeliefNodeRepository,
+    private readonly llmService: StructuredLlmService,
+    private readonly resetService: PipelineResetService,
     private readonly graphValidation: GraphValidationService,
-    private readonly rubric: RubricService,
+    private readonly rubricService: RubricService,
   ) {}
 
   /** Extract beliefs from a project source (defaults to the briefing) and persist them. */
   async run(projectId: number, user: User, sourceId?: number): Promise<BeliefNode[]> {
-    const project = await this.projects.findOne(projectId, user); // enforces tenancy
+    const project = await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
     const source = await this.resolveSource(projectId, sourceId);
 
-    const { beliefs } = await this.structured.run({
+    const { beliefs } = await this.llmService.run({
       promptKey: PromptKey.EXTRACT_BELIEFS,
       vars: {
         source: source.content,
         sourceKind: source.kind,
-        rubricList: this.rubric.promptList(this.rubric.forProject(project)),
+        rubricList: this.rubricService.promptList(this.rubricService.forProject(project)),
       },
       schema: ExtractBeliefsSchema,
       accountId: user.accountId,
@@ -54,14 +48,13 @@ export class ExtractionService {
       validate: (value) => this.gradeGrounding(value, source),
     });
 
-    // Idempotent per round: replace any nodes previously extracted for this round.
-    await this.nodes.deleteMany({ projectId, round: source.round });
+    await this.beliefNodeRepository.deleteMany({ projectId, round: source.round });
 
     const created: BeliefNode[] = [];
     for (const belief of beliefs) {
       const grounded = this.ground(belief, source);
       created.push(
-        await this.nodes.create({
+        await this.beliefNodeRepository.create({
           project: { connect: { id: project.id } },
           nodeType: belief.nodeType,
           kind: belief.kind,
@@ -76,22 +69,19 @@ export class ExtractionService {
       );
     }
 
-    // First extraction moves the project into analysis; don't regress later stages.
     if (project.stage === ProjectStage.BRIEFING) {
-      await this.projectRepo.update(project.id, { stage: ProjectStage.GAP_ANALYSIS } as any);
+      await this.projectRepository.update(project.id, { stage: ProjectStage.GAP_ANALYSIS } as any);
     }
 
-    // New beliefs make coverage/questions/conflicts and the whole delivery chain
-    // stale — clear them (rounds + answered questions are preserved).
-    await this.reset.afterExtraction(project.id);
+    await this.resetService.afterExtraction(project.id);
 
     return created;
   }
 
   private async resolveSource(projectId: number, sourceId?: number): Promise<Source> {
     const source = sourceId
-      ? await this.sources.findById(sourceId)
-      : await this.sources.findBriefing(projectId);
+      ? await this.sourceRepository.findById(sourceId)
+      : await this.sourceRepository.findBriefing(projectId);
     if (!source || source.projectId !== projectId) {
       throw new BadRequestException('No source to extract from');
     }

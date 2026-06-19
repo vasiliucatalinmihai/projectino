@@ -41,7 +41,7 @@ export class ProjectController {
   @ApiOperation({ summary: 'List projects in your account', description: 'Requires VIEW_ONLY.' })
   @ApiOkResponse({ type: [ProjectResponse] })
   async findAll(@CurrentUser() user: User): Promise<ProjectResponse[]> {
-    const projects = await this.projectService.findAll(user);
+    const projects = await this.projectService.getAllProjectsForUser(user);
     return projects.map(ProjectResponse.fromEntity);
   }
 
@@ -55,7 +55,7 @@ export class ProjectController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: User,
   ): Promise<ProjectResponse> {
-    return ProjectResponse.fromEntity(await this.projectService.findOne(id, user));
+    return ProjectResponse.fromEntity(await this.projectService.getProjectForUser(id, user));
   }
 
   @Get(':id/usage')

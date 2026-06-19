@@ -20,8 +20,6 @@ import { createConcurrencyLimiter } from '../common/concurrency';
 import { ProjectService } from './project.service';
 import { PipelineResetService } from './pipeline-reset.service';
 
-/** A single task estimated above this many person-days is almost certainly a
- *  model error (and would distort the proposal price); clamp it to the ceiling. */
 const MAX_TASK_DAYS = 60;
 
 export interface DeliveryNode {
@@ -50,39 +48,28 @@ interface PrdContext {
 }
 
 /**
- * Phase 7 — the delivery layer. Decompose the latest PRD into Epic → Story →
- * Task with ranged estimates and MVP/later phasing.
- *
- * Generation is split into shallow LLM calls so weaker models nest reliably and
- * so estimation is its own focused step: one call lists the epics, then per epic
- * one call produces its stories+tasks (no numbers) and a second call sizes all of
- * that epic's tasks together — seeing the whole task set lets the model size them
- * relative to one another instead of pricing each task as it's invented. All
- * outputs are validated/normalized by their schemas (the weak-nesting rescue
- * lives in GenerateEpicPlanSchema). Per-epic work runs in parallel.
+ * Decompose the latest PRD into Epic → Story → Task with ranged estimates and MVP/later phasing.
  */
 @Injectable()
 export class DeliveryService {
   constructor(
-    private readonly projects: ProjectService,
+    private readonly projectService: ProjectService,
     private readonly projectRepo: ProjectRepository,
-    private readonly items: DeliveryItemRepository,
-    private readonly definitions: ProductDefinitionRepository,
-    private readonly structured: StructuredLlmService,
-    private readonly reset: PipelineResetService,
+    private readonly deliveryItemRepository: DeliveryItemRepository,
+    private readonly productDefinitionRepository: ProductDefinitionRepository,
+    private readonly llmService: StructuredLlmService,
+    private readonly resetService: PipelineResetService,
   ) {}
 
-  /** Nested epics→stories→tasks with rolled-up estimate ranges. */
   async tree(projectId: number, user: User): Promise<DeliveryTree> {
-    await this.projects.findOne(projectId, user);
-    const allItems = await this.items.findAllForProject(projectId);
+    await this.projectService.getProjectForUser(projectId, user);
+    const allItems = await this.deliveryItemRepository.findAllForProject(projectId);
     return this.buildTree(allItems);
   }
 
-  /** The delivery plan rendered as a shareable markdown document. */
   async buildDoc(projectId: number, user: User): Promise<string> {
-    const project = await this.projects.findOne(projectId, user); // enforces tenancy
-    const tree = this.buildTree(await this.items.findAllForProject(projectId));
+    const project = await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
+    const tree = this.buildTree(await this.deliveryItemRepository.findAllForProject(projectId));
 
     const days = (lo: number | null, hi: number | null): string => {
       if (lo == null && hi == null) return '—';
@@ -112,23 +99,23 @@ export class DeliveryService {
   }
 
   async generate(projectId: number, user: User): Promise<DeliveryTree> {
-    const project = await this.projects.findOne(projectId, user); // enforces tenancy
-    const def = await this.definitions.findLatestForProject(projectId);
-    if (!def) {
+    const project = await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
+    const definition = await this.productDefinitionRepository.findLatestForProject(projectId);
+    if (!definition) {
       throw new BadRequestException('Generate a product definition before planning delivery');
     }
-    const content = (def.content ?? {}) as Record<string, any>;
-    const prd: PrdContext = {
+    const content = (definition.content ?? {}) as Record<string, any>;
+    const prdContext: PrdContext = {
       summary: this.toText(content.summary),
       inScope: this.toBulletList(content.in_scope),
       userStories: this.toStoryBulletList(content.user_stories),
       nonFunctional: this.toBulletList(content.non_functional),
     };
 
-    // 1) Epics (flat — one shallow call).
-    const { epics } = await this.structured.run({
+    // Epics (flat — one call).
+    const { epics } = await this.llmService.run({
       promptKey: PromptKey.GENERATE_EPICS,
-      vars: { summary: prd.summary, inScope: prd.inScope, userStories: prd.userStories },
+      vars: { summary: prdContext.summary, inScope: prdContext.inScope, userStories: prdContext.userStories },
       schema: GenerateEpicsSchema,
       accountId: user.accountId,
       subject: { type: 'project', id: project.id },
@@ -138,15 +125,13 @@ export class DeliveryService {
       throw new UnprocessableEntityException('Model did not return any epics');
     }
 
-    // Regenerate: clear the old plan (children first to respect the self-FK).
     for (const level of [DeliveryLevel.TASK, DeliveryLevel.STORY, DeliveryLevel.EPIC]) {
-      await this.items.deleteMany({ projectId, level });
+      await this.deliveryItemRepository.deleteMany({ projectId, level });
     }
 
-    // Create the epic rows first (so children can reference them).
     const epicRows: Array<{ row: DeliveryItem; epic: GenerateEpicsResult['epics'][number] }> = [];
     for (let epicIndex = 0; epicIndex < epics.length; epicIndex++) {
-      const row = await this.items.create({
+      const row = await this.deliveryItemRepository.create({
         project: { connect: { id: projectId } },
         level: DeliveryLevel.EPIC,
         title: epics[epicIndex].title.slice(0, 200) || `Epic ${epicIndex + 1}`,
@@ -156,27 +141,19 @@ export class DeliveryService {
       epicRows.push({ row, epic: epics[epicIndex] });
     }
 
-    // 2) Stories + tasks per epic, capped at 3 concurrent so a burst of calls
-    //    doesn't trip provider rate limits. A failed epic plan is skipped, not
-    //    fatal, so one flaky call doesn't lose the whole plan.
     const limit = createConcurrencyLimiter(3);
     await Promise.all(
       epicRows.map(({ row, epic }) =>
-        limit(() => this.planEpic(project.id, user.accountId, prd, row, epic).catch(() => undefined)),
+        limit(() => this.planEpic(project.id, user.accountId, prdContext, row, epic).catch(() => undefined)),
       ),
     );
 
     // Move into PLANNING. Regenerating the plan clears any proposal below
-    // (afterDelivery), so dropping back from PROPOSAL → PLANNING is correct.
     await this.projectRepo.update(project.id, { stage: ProjectStage.PLANNING } as any);
+    await this.resetService.afterDelivery(project.id);
 
-    // A regenerated plan makes any existing proposal stale.
-    await this.reset.afterDelivery(project.id);
-
-    return this.buildTree(await this.items.findAllForProject(projectId));
+    return this.buildTree(await this.deliveryItemRepository.findAllForProject(projectId));
   }
-
-  // ── generation ───────────────────────────────────────────────────
 
   /**
    * Generate one epic's stories+tasks (decomposition), then estimate all of its
@@ -189,8 +166,7 @@ export class DeliveryService {
     epicRow: DeliveryItem,
     epic: GenerateEpicsResult['epics'][number],
   ): Promise<void> {
-    // 1) Decompose into stories + tasks (no numbers).
-    const { stories } = await this.structured.run({
+    const { stories } = await this.llmService.run({
       promptKey: PromptKey.GENERATE_EPIC_PLAN,
       vars: {
         summary: prd.summary,
@@ -205,8 +181,6 @@ export class DeliveryService {
         value.stories.reduce((sum, story) => sum + story.tasks.length, 0),
     });
 
-    // Flatten the tasks into one indexed list (1-based) so a single estimate
-    // call can size the whole epic at once and we can map the numbers back.
     const flat: Array<{ index: number; storyTitle: string; task: GenerateEpicPlanResult['stories'][number]['tasks'][number] }> = [];
     for (const story of stories) {
       for (const task of story.tasks) {
@@ -215,17 +189,12 @@ export class DeliveryService {
     }
     if (!flat.length) return;
 
-    // 2) Estimate all tasks together. Estimates are a best-effort enrichment —
-    //    if the call fails we still keep the decomposition (tasks land unestimated)
-    //    rather than losing the whole epic.
     const estimateByIndex = await this.estimateTasks(projectId, accountId, prd, epic, flat);
 
-    // 3) Persist, walking the tasks in the SAME order used to build `flat` so the
-    //    1-based index lines up with the returned estimates.
     let storyIndex = 0;
     let globalIndex = 0;
     for (const story of stories) {
-      const storyRow = await this.items.create({
+      const storyRow = await this.deliveryItemRepository.create({
         project: { connect: { id: projectId } },
         parent: { connect: { id: epicRow.id } },
         level: DeliveryLevel.STORY,
@@ -238,7 +207,7 @@ export class DeliveryService {
       for (const task of story.tasks) {
         const estimate = estimateByIndex.get(++globalIndex);
         const [low, high] = this.estimateRange(estimate?.estimateLow ?? null, estimate?.estimateHigh ?? null);
-        await this.items.create({
+        await this.deliveryItemRepository.create({
           project: { connect: { id: projectId } },
           parent: { connect: { id: storyRow.id } },
           level: DeliveryLevel.TASK,
@@ -253,11 +222,6 @@ export class DeliveryService {
     }
   }
 
-  /**
-   * Size every task of one epic in a single LLM call. Returns a map from the
-   * 1-based task index to its estimate; empty if the call fails (the caller then
-   * persists the tasks unestimated rather than dropping the epic).
-   */
   private async estimateTasks(
     projectId: number,
     accountId: number,
@@ -274,7 +238,7 @@ export class DeliveryService {
       .join('\n');
 
     try {
-      const { estimates } = await this.structured.run({
+      const { estimates } = await this.llmService.run({
         promptKey: PromptKey.ESTIMATE_EPIC,
         vars: {
           summary: prd.summary,

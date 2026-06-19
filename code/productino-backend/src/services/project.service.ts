@@ -11,7 +11,6 @@ import {
 import { Client, Project, User } from '../entities';
 import { RubricArea, RubricService } from './rubric.service';
 
-// Service-level inputs (no HTTP DTOs).
 export interface CreateProjectInput {
   name: string;
   clientId: number;
@@ -24,19 +23,16 @@ export interface UpdateProjectInput {
   stage?: ProjectStage;
 }
 
-/** Token usage for a project, with a per-prompt (pipeline stage) breakdown. */
 export interface ProjectTokenUsage extends TokenUsage {
   byPrompt: PromptTokenUsage[];
 }
 
-/** A project's effective rubric, whether it's customized, and the full catalog. */
 export interface ProjectRubric {
   isCustom: boolean;
   areas: RubricArea[];
   catalog: RubricArea[];
 }
 
-// Load the briefing source alongside the project so `project.briefing` resolves.
 const PROJECT_INCLUDE = {
   client: true,
   account: true,
@@ -46,29 +42,27 @@ const PROJECT_INCLUDE = {
 @Injectable()
 export class ProjectService {
   constructor(
-    private readonly projects: ProjectRepository,
-    private readonly clients: ClientRepository,
-    private readonly sources: SourceRepository,
-    private readonly promptRuns: PromptRunRepository,
-    private readonly rubric: RubricService,
+    private readonly projectRepository: ProjectRepository,
+    private readonly clientRepository: ClientRepository,
+    private readonly sourceRepository: SourceRepository,
+    private readonly promptRunRepository: PromptRunRepository,
+    private readonly rubricService: RubricService,
   ) {}
 
-  // Everyone is scoped to their own account; super admins reach other accounts
-  // by impersonating them (impersonation swaps the account context).
-  private scope(user: User): Record<string, any> {
+  private getAccountId(user: User): Record<string, any> {
     return { accountId: user.accountId };
   }
 
-  findAll(user: User): Promise<Project[]> {
-    return this.projects.findMany({
-      where: this.scope(user),
+  public getAllProjectsForUser(user: User): Promise<Project[]> {
+    return this.projectRepository.findMany({
+      where: this.getAccountId(user),
       include: PROJECT_INCLUDE,
       orderBy: { id: 'desc' },
     });
   }
 
-  async findOne(id: number, user: User): Promise<Project> {
-    const project = await this.projects.findUnique({
+  async getProjectForUser(id: number, user: User): Promise<Project> {
+    const project = await this.projectRepository.findUnique({
       where: { id },
       include: PROJECT_INCLUDE,
     });
@@ -78,9 +72,8 @@ export class ProjectService {
     return project;
   }
 
-  /** Resolve a client the user may use, enforcing account ownership. */
   private async resolveClient(clientId: number, user: User): Promise<Client> {
-    const client = await this.clients.findById(clientId);
+    const client = await this.clientRepository.findById(clientId);
     if (!client || client.accountId !== user.accountId) {
       throw new BadRequestException(`Client ${clientId} not found in your account`);
     }
@@ -88,22 +81,21 @@ export class ProjectService {
   }
 
   async create(input: CreateProjectInput, user: User): Promise<Project> {
-    // A project inherits its client's account, keeping the two in sync.
     const client = await this.resolveClient(input.clientId, user);
-    const project = await this.projects.create({
+    const project = await this.projectRepository.create({
       name: input.name,
       account: { connect: { id: client.accountId } },
       client: { connect: { id: client.id } },
     } as any);
-    // The initial briefing becomes the first Source (round 1) of the Belief Graph.
+    // The initial briefing becomes the first Source of the Belief Graph.
     if (input.briefing) {
       await this.upsertBriefing(project.id, input.briefing);
     }
-    return this.findOne(project.id, user);
+    return this.getProjectForUser(project.id, user);
   }
 
   async update(id: number, input: UpdateProjectInput, user: User): Promise<Project> {
-    const project = await this.findOne(id, user); // enforces account ownership
+    const project = await this.getProjectForUser(id, user); // enforces account ownership
     const { briefing, clientId, ...rest } = input;
     const data: any = { ...rest };
 
@@ -116,70 +108,67 @@ export class ProjectService {
     }
 
     if (Object.keys(data).length > 0) {
-      await this.projects.update(id, data);
+      await this.projectRepository.update(id, data);
     }
     if (briefing !== undefined) {
       await this.upsertBriefing(id, briefing);
     }
-    return this.findOne(id, user);
+    return this.getProjectForUser(id, user);
   }
 
   async remove(id: number, user: User): Promise<Project> {
-    const project = await this.findOne(id, user);
-    await this.projects.delete(id); // cascades to the Belief Graph (sources, nodes, …)
+    const project = await this.getProjectForUser(id, user);
+    await this.projectRepository.delete(id); // cascades to the Belief Graph (sources, nodes, …)
     return project;
   }
 
-  /** LLM token usage for a project, summed from its logged prompt runs. */
+  /**
+   *  LLM token usage for a project, summed from its logged prompt runs
+   * @todo this is not by model (all mixed up)
+   */
   async tokenUsage(id: number, user: User): Promise<ProjectTokenUsage> {
-    await this.findOne(id, user); // enforces tenancy
+    await this.getProjectForUser(id, user); // enforces tenancy
     const [totals, byPrompt] = await Promise.all([
-      this.promptRuns.tokenUsageForSubject('project', id),
-      this.promptRuns.tokenUsageByPromptForSubject('project', id),
+      this.promptRunRepository.tokenUsageForSubject('project', id),
+      this.promptRunRepository.tokenUsageByPromptForSubject('project', id),
     ]);
     return { ...totals, byPrompt };
   }
 
-  /** The project's effective discovery rubric (+ whether it's custom + the catalog). */
   async getRubric(id: number, user: User): Promise<ProjectRubric> {
-    const project = await this.findOne(id, user); // enforces tenancy
+    const project = await this.getProjectForUser(id, user); // enforces tenancy
     return this.buildRubric(project);
   }
 
-  /**
-   * Set (or clear, when `config` is null) the project's rubric override. A non-null
-   * config is validated by RubricService; invalid input surfaces as a 400.
-   */
   async setRubric(id: number, config: unknown | null, user: User): Promise<ProjectRubric> {
-    await this.findOne(id, user); // enforces tenancy
+    await this.getProjectForUser(id, user); // enforces tenancy
     let value: Prisma.InputJsonValue | typeof Prisma.DbNull = Prisma.DbNull;
     if (config != null) {
       try {
-        value = this.rubric.normalizeConfig(config) as unknown as Prisma.InputJsonValue;
+        value = this.rubricService.normalizeConfig(config) as unknown as Prisma.InputJsonValue;
       } catch (error: any) {
         throw new BadRequestException(error?.message ?? 'Invalid rubric configuration');
       }
     }
-    await this.projects.update(id, { rubric: value } as any);
-    return this.buildRubric(await this.findOne(id, user));
+    await this.projectRepository.update(id, { rubric: value } as any);
+    return this.buildRubric(await this.getProjectForUser(id, user));
   }
 
   private buildRubric(project: Project): ProjectRubric {
     return {
-      isCustom: this.rubric.isCustom(project),
-      areas: this.rubric.forProject(project),
-      catalog: this.rubric.catalog(),
+      isCustom: this.rubricService.isCustom(project),
+      areas: this.rubricService.forProject(project),
+      catalog: this.rubricService.catalog(),
     };
   }
 
-  /** Create or replace the project's BRIEFING source (the seed input). */
   private async upsertBriefing(projectId: number, briefing: string | null): Promise<void> {
-    const existing = await this.sources.findBriefing(projectId);
+    const existing = await this.sourceRepository.findBriefing(projectId);
     const content = briefing ?? '';
     if (existing) {
-      await this.sources.update(existing.id, { content } as any);
+      await this.sourceRepository.update(existing.id, { content } as any);
     } else if (content) {
-      await this.sources.create({
+      await this.sourceRepository.create({
         project: { connect: { id: projectId } },
         kind: SourceKind.BRIEFING,
         content,

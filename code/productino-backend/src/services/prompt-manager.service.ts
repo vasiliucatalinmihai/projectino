@@ -16,25 +16,15 @@ interface CacheEntry {
   render: (vars: Record<string, any>) => string;
 }
 
-/**
- * Resolves prompts for a given key. Markdown files in `src/prompts/` are the
- * authoring source; on boot they are synced into the DB as immutable versions,
- * and the active version per key is cached in memory for fast `get()`.
- *
- *   promptManager.get(PromptKey.GAP_ANALYSIS, { briefing })
- *
- * Phase 1: single active version per prompt. A/B experiments + run logging
- * (PromptExperiment / PromptRun tables) come in later phases.
- */
 @Injectable()
 export class PromptManagerService implements OnModuleInit {
   private readonly logger = new Logger(PromptManagerService.name);
   private cache = new Map<string, CacheEntry>();
 
   constructor(
-    private readonly prompts: PromptRepository,
-    private readonly versions: PromptVersionRepository,
-    private readonly runs: PromptRunRepository,
+    private readonly promptRepository: PromptRepository,
+    private readonly promptVersionRepository: PromptVersionRepository,
+    private readonly promptRunRepository: PromptRunRepository,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -47,7 +37,7 @@ export class PromptManagerService implements OnModuleInit {
     }
   }
 
-  /** Render the active version of a prompt with the given variables. */
+  /** Render the active version of a prompt with the given vars */
   get(key: string, vars: Record<string, any> = {}): RenderedPrompt {
     const entry = this.cache.get(key);
     if (!entry) {
@@ -62,26 +52,8 @@ export class PromptManagerService implements OnModuleInit {
     };
   }
 
-  /**
-   * Log the outcome of an LLM call against the prompt version that produced it.
-   * Call after the call completes (or fails) so versions can be compared:
-   *
-   *   const p = mgr.get(PromptKey.GAP_ANALYSIS, { briefing });
-   *   const t0 = Date.now();
-   *   try {
-   *     const res = await claude.run(p.content, p.config);
-   *     await mgr.recordOutcome(p, { success: true, latencyMs: Date.now() - t0, tokensIn, tokensOut, score },
-   *       { subjectType: 'project', subjectId });
-   *   } catch (e) {
-   *     await mgr.recordOutcome(p, { success: false, latencyMs: Date.now() - t0, meta: { error: e.message } });
-   *   }
-   */
-  recordOutcome(
-    rendered: RenderedPrompt,
-    outcome: PromptRunOutcome,
-    ctx: PromptRunContext = {},
-  ): Promise<PromptRun> {
-    return this.runs.create({
+  recordOutcome(rendered: RenderedPrompt, outcome: PromptRunOutcome, promptRunContext: PromptRunContext = {}): Promise<PromptRun> {
+    return this.promptRunRepository.create({
       promptKey: rendered.key,
       versionId: rendered.versionId,
       success: outcome.success ?? null,
@@ -91,8 +63,8 @@ export class PromptManagerService implements OnModuleInit {
       provider: outcome.provider ?? null,
       model: outcome.model ?? null,
       score: outcome.score ?? null,
-      subjectType: ctx.subjectType ?? null,
-      subjectId: ctx.subjectId ?? null,
+      subjectType: promptRunContext.subjectType ?? null,
+      subjectId: promptRunContext.subjectId ?? null,
       meta: outcome.meta ?? undefined,
     } as any);
   }
@@ -104,7 +76,6 @@ export class PromptManagerService implements OnModuleInit {
       this.logger.warn('No prompts directory found; skipping sync');
       return;
     }
-    const autoActivate = process.env.NODE_ENV !== 'production';
     const files = fs.readdirSync(dir).filter((file) => file.endsWith('.md'));
 
     for (const file of files) {
@@ -119,18 +90,18 @@ export class PromptManagerService implements OnModuleInit {
         .update(content + JSON.stringify(config))
         .digest('hex');
 
-      let prompt = await this.prompts.findByKey(key);
+      let prompt = await this.promptRepository.findByKey(key);
       if (!prompt) {
-        prompt = await this.prompts.create({ key, description: description ?? null } as any);
+        prompt = await this.promptRepository.create({ key, description: description ?? null } as any);
       } else if (description !== undefined && prompt.description !== description) {
-        prompt = await this.prompts.update(prompt.id, { description } as any);
+        prompt = await this.promptRepository.update(prompt.id, { description } as any);
       }
 
-      let version = await this.versions.findByChecksum(prompt.id, checksum);
+      let version = await this.promptVersionRepository.findByChecksum(prompt.id, checksum);
       let created = false;
       if (!version) {
-        const next = (await this.versions.maxVersion(prompt.id)) + 1;
-        version = await this.versions.create({
+        const next = (await this.promptVersionRepository.maxVersion(prompt.id)) + 1;
+        version = await this.promptVersionRepository.create({
           prompt: { connect: { id: prompt.id } },
           version: next,
           content,
@@ -142,21 +113,19 @@ export class PromptManagerService implements OnModuleInit {
         this.logger.log(`Prompt "${key}" → v${next} (from ${file})`);
       }
 
-      // Activation policy: always pin the latest in dev; in prod only auto-pin
-      // when nothing is active yet (otherwise require a manual promote).
-      const shouldActivate = !prompt.activeVersionId || (created && autoActivate);
+      const shouldActivate = !prompt.activeVersionId || created;
       if (shouldActivate && prompt.activeVersionId !== version.id) {
-        await this.prompts.update(prompt.id, { activeVersionId: version.id } as any);
+        await this.promptRepository.update(prompt.id, { activeVersionId: version.id } as any);
       }
     }
   }
 
-  /** Rebuild the in-memory cache of active prompts (compiles templates). */
+  /** Rebuild the in-memory cache of active prompts */
   async refreshCache(): Promise<void> {
     const nextCache = new Map<string, CacheEntry>();
-    for (const prompt of await this.prompts.findAll()) {
+    for (const prompt of await this.promptRepository.findAll()) {
       if (!prompt.activeVersionId) continue;
-      const version = await this.versions.findById(prompt.activeVersionId);
+      const version = await this.promptVersionRepository.findById(prompt.activeVersionId);
       if (!version) continue;
       nextCache.set(prompt.key, {
         key: prompt.key,
@@ -169,7 +138,6 @@ export class PromptManagerService implements OnModuleInit {
     this.cache = nextCache;
   }
 
-  /** Find the prompts directory across dev (src) and built (dist) layouts. */
   private resolvePromptsDir(): string | null {
     const candidates = [
       path.join(__dirname, '..', 'prompts'), // dist/prompts (assets copied on build)

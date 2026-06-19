@@ -21,7 +21,7 @@ export class AnswerService {
   ) {}
 
   async processAnswersText(projectId: number, user: User, answersText: string): Promise<void> {
-    const project = await this.projectService.findOne(projectId, user);
+    const project = await this.projectService.getProjectForUser(projectId, user);
     const replyText = (answersText ?? '').trim();
     if (!replyText) throw new BadRequestException('No answers provided');
 

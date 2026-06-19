@@ -19,7 +19,7 @@ export class ConflictService {
   ) {}
 
   async detect(projectId: number, user: User): Promise<Conflict[]> {
-    const project = await this.projectService.findOne(projectId, user); // enforces tenancy
+    const project = await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
     const nodes = await this.beliefNodeRepository.findAllForProject(projectId);
 
     await this.conflictRepository.deleteMany({ projectId });
@@ -82,7 +82,7 @@ export class ConflictService {
   }
 
   async setStatus( projectId: number, conflictId: number, user: User, status: ConflictStatus): Promise<Conflict> {
-    await this.projectService.findOne(projectId, user);
+    await this.projectService.getProjectForUser(projectId, user);
     const conflict = await this.conflictRepository.findById(conflictId);
     if (!conflict || conflict.projectId !== projectId) {
       throw new NotFoundException(`Conflict ${conflictId} not found`);

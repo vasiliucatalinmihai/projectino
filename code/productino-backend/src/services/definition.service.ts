@@ -37,7 +37,7 @@ export class DefinitionService {
   ) {}
 
   async latest(projectId: number, user: User): Promise<ProductDefinition | null> {
-    await this.projectService.findOne(projectId, user);
+    await this.projectService.getProjectForUser(projectId, user);
     return this.productDefinitionRepository.findLatestForProject(projectId);
   }
 
@@ -46,7 +46,7 @@ export class DefinitionService {
     user: User,
     input: GenerateDefinitionInput = {},
   ): Promise<ProductDefinition> {
-    const project = await this.projectService.findOne(projectId, user); // enforces tenancy
+    const project = await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
 
     const allRounds = await this.projectRoundRepository.findAllForProject(projectId);
     if (!allRounds.length) {

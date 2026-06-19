@@ -41,7 +41,7 @@ export class BeliefGraphService {
   ) {}
 
   async forProject(projectId: number, user: User): Promise<ProjectGraph> {
-    await this.projectService.findOne(projectId, user); // throws if not in the user's account
+    await this.projectService.getProjectForUser(projectId, user); // throws if not in the user's account
 
     const [sources, coverageAreas, nodes, questions, rounds, conflicts] = await Promise.all([
       this.sourceRepository.findAllForProject(projectId),

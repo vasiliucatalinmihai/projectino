@@ -14,36 +14,31 @@ import { DeliveryService, DeliveryNode } from './delivery.service';
 
 const PHASE_ORDER: Record<string, number> = { MVP: 0, 'PHASE 2': 1, LATER: 2 };
 
-/**
- * Phase 8 — the priced proposal / SOW. Phases, days and costs are computed
- * deterministically from the delivery plan (day-rate + buffer from Settings) so
- * pricing is never hallucinated; the LLM only writes the client-facing prose.
- */
 @Injectable()
 export class ProposalService {
   constructor(
-    private readonly projects: ProjectService,
-    private readonly delivery: DeliveryService,
-    private readonly definitions: ProductDefinitionRepository,
-    private readonly proposals: ProposalRepository,
-    private readonly settings: SettingRepository,
-    private readonly structured: StructuredLlmService,
-    private readonly projectRepo: ProjectRepository,
+    private readonly projectService: ProjectService,
+    private readonly deliveryService: DeliveryService,
+    private readonly productDefinitionRepository: ProductDefinitionRepository,
+    private readonly proposalRepository: ProposalRepository,
+    private readonly settingRepository: SettingRepository,
+    private readonly llmService: StructuredLlmService,
+    private readonly projectRepository: ProjectRepository,
   ) {}
 
   async latest(projectId: number, user: User): Promise<Proposal | null> {
-    await this.projects.findOne(projectId, user);
-    return this.proposals.findLatestForProject(projectId);
+    await this.projectService.getProjectForUser(projectId, user);
+    return this.proposalRepository.findLatestForProject(projectId);
   }
 
   async generate(projectId: number, user: User): Promise<Proposal> {
-    const project = await this.projects.findOne(projectId, user); // enforces tenancy
-    const tree = await this.delivery.tree(projectId, user);
-    if (!tree.epics.length) {
+    const project = await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
+    const deliveryTree = await this.deliveryService.tree(projectId, user);
+    if (!deliveryTree.epics.length) {
       throw new BadRequestException('Generate a delivery plan before the proposal');
     }
-    const def = await this.definitions.findLatestForProject(projectId);
-    const prd = (def?.content ?? {}) as Record<string, any>;
+    const definition = await this.productDefinitionRepository.findLatestForProject(projectId);
+    const definitionContent = (definition?.content ?? {}) as Record<string, any>;
 
     const currency = await this.setting(project.accountId, 'default_currency', 'EUR');
     const dayRate = this.toNumber(await this.setting(project.accountId, 'day_rate', '600'), 600);
@@ -52,12 +47,12 @@ export class ProposalService {
       20,
     );
 
-    const phases = this.computePhases(tree.epics, dayRate, bufferPct);
-    const prose = await this.writeProse(project, this.toText(prd.summary), phases);
+    const phases = this.computePhases(deliveryTree.epics, dayRate, bufferPct);
+    const proposalText = await this.writeProposal(project, this.toText(definitionContent.summary), phases);
 
     // Merge LLM prose (by phase name) into the computed phases.
     const narrativeByPhaseName = new Map<string, string>(
-      (prose.phases ?? []).map((phase: any) => [
+      (proposalText.phases ?? []).map((phase: any) => [
         this.toText(phase?.name).toUpperCase(),
         this.toText(phase?.narrative),
       ]),
@@ -71,22 +66,22 @@ export class ProposalService {
     const totalHighCost = phases.reduce((sum, phase) => sum + phase.highCost, 0);
 
     const content: ProposalContent = {
-      intro: this.toText(prose.intro),
-      closing: this.toText(prose.closing),
+      intro: this.toText(proposalText.intro),
+      closing: this.toText(proposalText.closing),
       currency,
       dayRate,
       bufferPct,
       phases,
-      assumptions: this.toStringList(prd.assumptions),
-      outOfScope: this.toStringList(prd.out_of_scope),
+      assumptions: this.toStringList(definitionContent.assumptions),
+      outOfScope: this.toStringList(definitionContent.out_of_scope),
       totalLowDays,
       totalHighDays,
       totalLowCost,
       totalHighCost,
     };
 
-    const version = (await this.proposals.countForProject(projectId)) + 1;
-    const proposal = await this.proposals.create({
+    const version = (await this.proposalRepository.countForProject(projectId)) + 1;
+    const proposal = await this.proposalRepository.create({
       project: { connect: { id: projectId } },
       version,
       content,
@@ -96,15 +91,13 @@ export class ProposalService {
       totalHighCost,
     } as any);
 
-    // The proposal is the terminal artifact — advance the project to PROPOSAL.
-    await this.projectRepo.update(projectId, { stage: ProjectStage.PROPOSAL } as any);
+    await this.projectRepository.update(projectId, { stage: ProjectStage.PROPOSAL } as any);
     return proposal;
   }
 
-  /** Client-facing markdown proposal. */
   async buildDoc(projectId: number, user: User): Promise<string> {
-    await this.projects.findOne(projectId, user);
-    const proposal = await this.proposals.findLatestForProject(projectId);
+    await this.projectService.getProjectForUser(projectId, user);
+    const proposal = await this.proposalRepository.findLatestForProject(projectId);
     if (!proposal) return '# Proposal\n\n_Not generated yet._\n';
     const content = proposal.content;
     const money = (amount: number) => `${content.currency} ${amount.toLocaleString('en-US')}`;
@@ -140,8 +133,6 @@ export class ProposalService {
     return lines.join('\n').trim() + '\n';
   }
 
-  // ── helpers ─────────────────────────────────────────────────────
-
   private computePhases(epics: DeliveryNode[], dayRate: number, bufferPct: number): ProposalPhase[] {
     const buckets = new Map<string, { lowDays: number; highDays: number; scope: Set<string> }>();
     for (const epic of epics) {
@@ -173,7 +164,7 @@ export class ProposalService {
       .sort((a, b) => (PHASE_ORDER[a.name.toUpperCase()] ?? 3) - (PHASE_ORDER[b.name.toUpperCase()] ?? 3));
   }
 
-  private async writeProse(
+  private async writeProposal(
     project: { name: string; client?: { name?: string } },
     summary: string,
     phases: ProposalPhase[],
@@ -182,8 +173,7 @@ export class ProposalService {
       .map((phase) => `${phase.name} — scope: ${phase.scope.join('; ') || '(general)'}`)
       .join('\n');
     try {
-      // Prose is optional — a failed/invalid generation still yields a fully-priced proposal.
-      return await this.structured.run({
+      return await this.llmService.run({
         promptKey: PromptKey.SYNTHESIZE_PROPOSAL,
         vars: {
           projectName: project.name,
@@ -201,7 +191,7 @@ export class ProposalService {
   }
 
   private async setting(accountId: number, key: string, fallback: string): Promise<string> {
-    const setting = await this.settings.findOne({ accountId, key } as any);
+    const setting = await this.settingRepository.findOne({ accountId, key } as any);
     return (setting as any)?.value ?? fallback;
   }
 

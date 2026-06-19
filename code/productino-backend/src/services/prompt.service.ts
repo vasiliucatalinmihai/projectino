@@ -7,7 +7,6 @@ import {
 } from '../repository';
 import { PromptRun } from '../entities';
 
-// Service-level outputs (no HTTP DTOs).
 export interface PromptSummary {
   id: number;
   key: string;
@@ -45,22 +44,21 @@ const EMPTY_STATS: VersionStats = {
   avgTokensOut: null,
 };
 
-/** Read-only admin queries over prompts, versions and their run stats. */
 @Injectable()
 export class PromptService {
   constructor(
-    private readonly prompts: PromptRepository,
-    private readonly versions: PromptVersionRepository,
-    private readonly runs: PromptRunRepository,
+    private readonly promptRepository: PromptRepository,
+    private readonly promptVersionRepository: PromptVersionRepository,
+    private readonly promptRunRepository: PromptRunRepository,
   ) {}
 
   async list(): Promise<PromptSummary[]> {
-    const allPrompts = await this.prompts.findAll();
+    const allPrompts = await this.promptRepository.findAll();
     const summaries = await Promise.all(
       allPrompts.map(async (prompt) => {
-        const versions = await this.versions.findMany({ where: { promptId: prompt.id } });
+        const versions = await this.promptVersionRepository.findMany({ where: { promptId: prompt.id } });
         const active = versions.find((version) => version.id === prompt.activeVersionId);
-        const runCount = await this.runs.count({ where: { promptKey: prompt.key } });
+        const runCount = await this.promptRunRepository.count({ where: { promptKey: prompt.key } });
         return {
           id: prompt.id,
           key: prompt.key,
@@ -75,14 +73,14 @@ export class PromptService {
   }
 
   async detail(key: string): Promise<PromptDetail> {
-    const prompt = await this.prompts.findByKey(key);
+    const prompt = await this.promptRepository.findByKey(key);
     if (!prompt) throw new NotFoundException(`Prompt "${key}" not found`);
 
-    const versions = await this.versions.findMany({
+    const versions = await this.promptVersionRepository.findMany({
       where: { promptId: prompt.id },
       orderBy: { version: 'desc' },
     });
-    const statsByVersion = await this.runs.statsByVersion(key);
+    const statsByVersion = await this.promptRunRepository.statsByVersion(key);
     const active = versions.find((version) => version.id === prompt.activeVersionId);
 
     const versionSummaries: PromptVersionSummary[] = versions.map((version) => ({
@@ -97,7 +95,7 @@ export class PromptService {
       stats: statsByVersion.get(version.id) ?? EMPTY_STATS,
     }));
 
-    const recentRuns = await this.runs.findMany({
+    const recentRuns = await this.promptRunRepository.findMany({
       where: { promptKey: key },
       orderBy: { createdAt: 'desc' },
       take: 20,

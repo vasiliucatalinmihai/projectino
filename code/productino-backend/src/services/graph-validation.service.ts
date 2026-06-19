@@ -1,13 +1,11 @@
 import { Injectable } from '@nestjs/common';
 
-/** Where a quote was found in the source, and how confidently. */
 export type QuoteMatch = 'exact' | 'normalized' | 'fuzzy' | 'none';
 export interface QuoteLocation {
   span?: [number, number];
   match: QuoteMatch;
 }
 
-/** Result of grading a batch of beliefs' quotes against their source. */
 export interface BeliefGrading {
   graded: number; // beliefs that carried a non-empty quote
   grounded: number; // of those, found in the source (any match tier)
@@ -15,7 +13,6 @@ export interface BeliefGrading {
   rate: number; // grounded / graded (1.0 when nothing to grade)
 }
 
-/** Resolving model-emitted references (e.g. belief names) onto the real graph. */
 export interface RefResolution {
   resolved: Map<string, string>; // input name → canonical node name
   unknown: string[]; // references that match no node
@@ -27,8 +24,7 @@ const REF_JACCARD = 0.5; // reference → node name: token-set overlap
 /**
  * Deterministic, LLM-free semantic checks over model output. The product's
  * immutable Source text and the existing belief graph are the oracle: we verify
- * that quotes actually appear in the source and that references point at real
- * nodes — catching fabrication without a second model call.
+ * that quotes actually appear in the source and that references point at real nodes
  */
 @Injectable()
 export class GraphValidationService {
@@ -108,8 +104,6 @@ export class GraphValidationService {
     }
     return { resolved, unknown };
   }
-
-  // ── internals ────────────────────────────────────────────────────
 
   private whitespaceTolerantRegex(quote: string): RegExp | null {
     if (!/[a-zA-Z0-9]/.test(quote)) return null;

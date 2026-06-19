@@ -29,7 +29,7 @@ export class CoverageService {
   ) {}
 
   async run(projectId: number, user: User): Promise<ProjectRound> {
-    const project = await this.projectService.findOne(projectId, user); // enforces tenancy
+    const project = await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
     const nodes = await this.beliefNodeRepository.findAllForProject(projectId);
     if (!nodes.length) {
       throw new BadRequestException('Extract beliefs before scoring coverage');

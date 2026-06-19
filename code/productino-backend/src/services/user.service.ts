@@ -10,7 +10,6 @@ import { PermissionKey } from '../common/permission-key';
 import { User } from '../entities';
 import { AccountRepository, UserRepository } from '../repository';
 
-// Service-level inputs (no HTTP DTOs).
 export interface CreateUserInput {
   email: string;
   name?: string | null;
@@ -25,26 +24,15 @@ export interface UpdateUserInput {
   accountId?: number;
 }
 
-/**
- * Manage users within an account. Tenant admins (ADMIN) manage their own
- * account's users; super admins manage any account and may target an accountId.
- */
 @Injectable()
 export class UserService {
-  constructor(
-    private readonly users: UserRepository,
-    private readonly accounts: AccountRepository,
-  ) {}
+  constructor(private readonly users: UserRepository, private readonly accounts: AccountRepository) {}
 
   list(actingUser: User, accountId?: number): Promise<User[]> {
     const scope = actingUser.isSuperAdmin ? accountId ?? null : actingUser.accountId;
     return this.users.findForAccount(scope);
   }
 
-  /**
-   * Create a user *without* a password — they're inactive and carry a
-   * one-shot activation token that the admin shares as a link.
-   */
   async create(input: CreateUserInput, actingUser: User): Promise<User> {
     const accountId = this.resolveAccountId(input.accountId, actingUser);
     this.assertAssignable(input.permissions, actingUser);
@@ -71,7 +59,6 @@ export class UserService {
     this.assertCanManageTarget(target, actingUser);
     this.assertAssignable(input.permissions, actingUser);
 
-    // Self-deactivation lock-out: don't let an admin disable their own login.
     if (input.active === false && target.id === actingUser.id) {
       throw new ForbiddenException('You cannot deactivate your own account');
     }
@@ -97,10 +84,6 @@ export class UserService {
     return (await this.users.findByIdWithPermissions(id))!;
   }
 
-  /**
-   * Self-service password reset: the caller clears their own password and gets
-   * a fresh activation token so they can set a new one through /activate.
-   */
   async resetSelf(actingUser: User): Promise<User> {
     await this.users.update(actingUser.id, {
       passwordHash: null,
@@ -110,10 +93,6 @@ export class UserService {
     return (await this.users.findByIdWithPermissions(actingUser.id))!;
   }
 
-  /**
-   * Reset a user's password: clear the current password, mark them inactive,
-   * and mint a fresh activation token for the admin to share.
-   */
   async resetPassword(id: number, actingUser: User): Promise<User> {
     const target = await this.getScoped(id, actingUser);
     this.assertCanManageTarget(target, actingUser);
@@ -139,10 +118,7 @@ export class UserService {
     return target;
   }
 
-  // ── helpers ───────────────────────────────────────────────────
-
   private newToken(): string {
-    // 256 bits of entropy; opaque hex so it's URL-safe.
     return randomBytes(32).toString('hex');
   }
 

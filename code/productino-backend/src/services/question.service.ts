@@ -16,27 +16,16 @@ const IMPACT_ORDER: Record<string, number> = {
   [QuestionImpact.LOW]: 2,
 };
 
-/**
- * Phase 4 — question curation + the client-facing export. The consultant
- * includes/excludes/edits questions; the export emits only the chosen ones with
- * their assumed answers and NO internal scoring (the client never sees it).
- */
 @Injectable()
 export class QuestionService {
   constructor(
-    private readonly projects: ProjectService,
-    private readonly questions: QuestionRepository,
+    private readonly projectService: ProjectService,
+    private readonly questionRepository: QuestionRepository,
   ) {}
 
-  /** Curate a single question (include/exclude, edit text or assumed answer). */
-  async update(
-    projectId: number,
-    questionId: number,
-    user: User,
-    input: CurateQuestionInput,
-  ): Promise<Question> {
-    await this.projects.findOne(projectId, user); // enforces tenancy
-    const question = await this.questions.findById(questionId);
+  async update(projectId: number, questionId: number, user: User, input: CurateQuestionInput): Promise<Question> {
+    await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
+    const question = await this.questionRepository.findById(questionId);
     if (!question || question.projectId !== projectId) {
       throw new NotFoundException(`Question ${questionId} not found`);
     }
@@ -44,17 +33,12 @@ export class QuestionService {
     if (input.status !== undefined) updates.status = input.status;
     if (input.text !== undefined) updates.text = input.text;
     if (input.assumedAnswer !== undefined) updates.assumedAnswer = input.assumedAnswer;
-    return this.questions.update(questionId, updates);
+    return this.questionRepository.update(questionId, updates);
   }
 
-  /**
-   * Client-facing markdown of the questions to ask. Uses INCLUDED questions when
-   * the consultant has curated, else falls back to all OPEN ones. Internal
-   * scores / impact / coverage keys are deliberately omitted.
-   */
   async buildClientDoc(projectId: number, user: User): Promise<string> {
-    await this.projects.findOne(projectId, user);
-    const allQuestions = await this.questions.findAllForProject(projectId);
+    await this.projectService.getProjectForUser(projectId, user);
+    const allQuestions = await this.questionRepository.findAllForProject(projectId);
     let chosen = allQuestions.filter((question) => question.status === QuestionStatus.INCLUDED);
     if (!chosen.length)
       chosen = allQuestions.filter((question) => question.status === QuestionStatus.OPEN);

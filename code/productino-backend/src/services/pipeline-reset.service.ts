@@ -14,18 +14,9 @@ import {
 } from '../repository';
 import { ProjectService } from './project.service';
 
-/** Which step a manual reset starts from; everything downstream is cleared too. */
+/** Witch step a manual reset starts from; everything down is cleared too. */
 export type ResetFrom = 'graph' | 'definition' | 'delivery' | 'proposal';
 
-/**
- * Keeps the pipeline consistent. Each step's outputs are derived from the step
- * before it, so re-running an upstream step makes everything downstream stale.
- * Services call the `after*` methods to auto-cascade that staleness away; the
- * `resetFrom` method backs the manual, user-triggered reset.
- *
- * `ProjectRound` snapshots (the convergence ledger) are append-only and are NOT
- * cleared by auto-cascade — only by an explicit full graph reset.
- */
 @Injectable()
 export class PipelineResetService {
   constructor(
@@ -43,8 +34,6 @@ export class PipelineResetService {
 
   // ── auto-cascade (called by the step services after they re-run) ──
 
-  /** Beliefs changed → coverage, open questions, conflicts and the whole
-   *  delivery chain are stale. Rounds and answered questions are preserved. */
   async afterExtraction(projectId: number): Promise<void> {
     await Promise.all([
       this.coverage.deleteMany({ projectId }),
@@ -56,26 +45,22 @@ export class PipelineResetService {
     await this.clearDelivery(projectId);
   }
 
-  /** Coverage changed → the PRD and everything built from it are stale. */
   async afterScoring(projectId: number): Promise<void> {
     await this.clearDefinitionDown(projectId);
   }
 
-  /** PRD changed → the delivery plan and proposal are stale. */
   async afterDefinition(projectId: number): Promise<void> {
     await this.proposals.deleteMany({ projectId });
     await this.clearDelivery(projectId);
   }
 
-  /** Delivery plan changed → the proposal is stale. */
   async afterDelivery(projectId: number): Promise<void> {
     await this.proposals.deleteMany({ projectId });
   }
 
-  // ── manual reset (user-triggered; enforces tenancy) ───────────────
-
+  // ── manual reset
   async resetFrom(projectId: number, user: User, from: ResetFrom): Promise<void> {
-    await this.projects.findOne(projectId, user); // enforces tenancy
+    await this.projects.getProjectForUser(projectId, user); // enforces tenancy
     switch (from) {
       case 'graph':
         return this.resetGraph(projectId);
@@ -92,9 +77,6 @@ export class PipelineResetService {
     }
   }
 
-  // ── helpers ───────────────────────────────────────────────────────
-
-  /** Wipe the whole Understanding layer + everything downstream (keeps sources). */
   private async resetGraph(projectId: number): Promise<void> {
     await Promise.all([
       this.nodes.deleteMany({ projectId }),
@@ -117,7 +99,6 @@ export class PipelineResetService {
     await this.clearDelivery(projectId);
   }
 
-  /** Delete delivery items children-first to respect the self-relation FK. */
   private async clearDelivery(projectId: number): Promise<void> {
     for (const level of [DeliveryLevel.TASK, DeliveryLevel.STORY, DeliveryLevel.EPIC]) {
       await this.deliveryItems.deleteMany({ projectId, level });

@@ -1,53 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { Project } from '../entities';
 
-/**
- * The discovery completeness rubric — the taxonomy of what a buildable software
- * project needs to be defined. This service is the single home for rubric logic:
- * it owns the built-in catalog and resolves the *effective* rubric for a project
- * (which catalog areas it enables, plus any weight/name/hint overrides).
- *
- * Shared across the pipeline: extraction tags each belief with a `coverageKey`
- * from the effective rubric, scoring rolls confidence up per area and weights the
- * project gate by it, and the PRD projection reports per-area coverage.
- */
-
 export type RubricWeight = 'high' | 'medium' | 'low';
 
 export interface RubricArea {
   key: string;
   name: string;
   weight: RubricWeight;
-  /**
-   * One-line guidance on what "covered" means for this area. Embedded in the
-   * extraction and scoring prompts to sharpen categorization and judgement.
-   */
   hint?: string;
 }
 
-/** Per-area override a project may apply on top of a catalog area. */
 export interface RubricOverride {
   weight?: RubricWeight;
   name?: string;
   hint?: string;
 }
 
-/**
- * What a project stores in its `rubric` JSON column. `enabled` is the set of
- * catalog keys turned on; `overrides` tweaks individual areas. A null column
- * means "all catalog areas, catalog defaults".
- */
 export interface ProjectRubricConfig {
   enabled: string[];
   overrides?: Record<string, RubricOverride>;
 }
 
-/** A custom rubric is capped to keep scoring prompts sane and cheap. */
+/** keep scoring prompts sane and cheap. */
 export const MAX_RUBRIC_AREAS = 30;
 
 @Injectable()
 export class RubricService {
-  /** The built-in catalog of available areas — the default when a project hasn't configured one. */
   private static readonly CATALOG: readonly RubricArea[] = [
     {
       key: 'functional_scope',
@@ -135,39 +113,27 @@ export class RubricService {
     },
   ];
 
-  /** Relative weight of each area in the project rollup gate (a compliance gap hurts more). */
   private static readonly WEIGHT_VALUE: Record<RubricWeight, number> = { high: 3, medium: 2, low: 1 };
-
   private static readonly WEIGHTS: readonly RubricWeight[] = ['high', 'medium', 'low'];
 
-  /** All available areas (a fresh copy so callers can't mutate the catalog). */
   catalog(): RubricArea[] {
     return RubricService.CATALOG.map((area) => ({ ...area }));
   }
 
-  /** Numeric weight of a rubric weight band. */
   weightValue(weight: RubricWeight): number {
     return RubricService.WEIGHT_VALUE[weight] ?? 1;
   }
 
-  /** Whether the project carries a custom rubric (vs. the built-in default). */
   isCustom(project: Project): boolean {
     return project?.rubric != null;
   }
 
-  /** The effective rubric for a project: enabled catalog areas with overrides applied. */
   forProject(project: Project): RubricArea[] {
     return this.resolve(project?.rubric ?? null);
   }
 
-  /**
-   * Resolve a stored rubric config (or null) to the effective areas. Lenient by
-   * design — unknown/garbage shapes and unknown enabled keys are ignored, and an
-   * empty result falls back to the full catalog (the pipeline must always have
-   * ≥1 area). Strict validation lives in `normalizeConfig` (used by the API).
-   */
   resolve(stored: unknown): RubricArea[] {
-    const config = this.coerceConfig(stored);
+    const config = this.guessConfig(stored);
     if (!config) return this.catalog();
 
     const enabled = new Set(config.enabled);
@@ -186,18 +152,12 @@ export class RubricService {
     return areas.length ? areas : this.catalog();
   }
 
-  /** Render a rubric as the `- key — name: hint` bullet list embedded in prompts. */
   promptList(areas: RubricArea[]): string {
     return areas
       .map((area) => `- ${area.key} — ${area.name}${area.hint ? `: ${area.hint}` : ''}`)
       .join('\n');
   }
 
-  /**
-   * Validate + normalize a candidate config (a PUT body) into a clean
-   * ProjectRubricConfig. Throws a plain Error on a structural problem (the HTTP
-   * layer maps it to a 400). Enabled keys must exist in the catalog.
-   */
   normalizeConfig(raw: unknown): ProjectRubricConfig {
     if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
       throw new Error('rubric config must be an object with an "enabled" array');
@@ -225,10 +185,7 @@ export class RubricService {
     return config;
   }
 
-  // ── helpers ─────────────────────────────────────────────────────
-
-  /** Best-effort read of a stored value into a config shape (no throwing). */
-  private coerceConfig(stored: unknown): ProjectRubricConfig | null {
+  private guessConfig(stored: unknown): ProjectRubricConfig | null {
     if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return null;
     const value = stored as Record<string, unknown>;
     if (!Array.isArray(value.enabled)) return null;
