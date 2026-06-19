@@ -32,7 +32,7 @@ export abstract class PrismaRepository<T, CreateInput, UpdateInput> {
     return this.prisma[this.model] as any;
   }
 
-  // ── Entity mapping ──────────────────────────────────────────────
+  // -- Entity mapping ----------------------------------------------
 
   private toEntity(data: any): T {
     if (!this.entityClass || data === null || data === undefined) return data;
@@ -44,7 +44,7 @@ export abstract class PrismaRepository<T, CreateInput, UpdateInput> {
     return data.map((item) => new this.entityClass!(item));
   }
 
-  // ── Serialization ───────────────────────────────────────────────
+  // -- Serialization -----------------------------------------------
 
   /**
    * Serialize data for Prisma. Values exposing a `toDBValue()` method are
@@ -68,7 +68,7 @@ export abstract class PrismaRepository<T, CreateInput, UpdateInput> {
     return result;
   }
 
-  // ── Read ────────────────────────────────────────────────────────
+  // -- Read --------------------------------------------------------
 
   async findUnique(args: Record<string, any>): Promise<T | null> {
     return this.toEntity(await this.raw.findUnique(args));
@@ -114,7 +114,7 @@ export abstract class PrismaRepository<T, CreateInput, UpdateInput> {
     return this.raw.groupBy(args);
   }
 
-  // ── Write ───────────────────────────────────────────────────────
+  // -- Write -------------------------------------------------------
 
   async create(data: CreateInput): Promise<T> {
     return this.toEntity(await this.raw.create({ data: this.serialize(data) }));

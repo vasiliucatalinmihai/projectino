@@ -32,7 +32,7 @@ export class PipelineResetService {
     private readonly proposals: ProposalRepository,
   ) {}
 
-  // ── auto-cascade (called by the step services after they re-run) ──
+  // -- auto-cascade (called by the step services after they re-run) --
 
   async afterExtraction(projectId: number): Promise<void> {
     await Promise.all([
@@ -58,7 +58,7 @@ export class PipelineResetService {
     await this.proposals.deleteMany({ projectId });
   }
 
-  // ── manual reset
+  // -- manual reset
   async resetFrom(projectId: number, user: User, from: ResetFrom): Promise<void> {
     await this.projects.getProjectForUser(projectId, user); // enforces tenancy
     switch (from) {

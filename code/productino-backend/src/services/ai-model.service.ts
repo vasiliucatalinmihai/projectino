@@ -146,7 +146,7 @@ export class AiModelService {
     }
   }
 
-  // ── helpers ─────────────────────────────────────────────────────
+  // -- helpers -----------------------------------------------------
 
   // Which account an operation applies to: super admins may target any account;
   // tenant users are pinned to their own (a requested accountId is ignored).

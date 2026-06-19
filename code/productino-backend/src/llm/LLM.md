@@ -72,13 +72,13 @@ Two design rules drive the whole module:
 ```
 caller: StructuredLlmService.run({ key, vars, schema, accountId, validate? })
    │
-   1. PromptManagerService.get(key, vars)        ── render template → prompt text + config
+   1. PromptManagerService.get(key, vars)        -- render template → prompt text + config
    │
-   2. LlmConfigResolverService.resolve(account)  ── BYO-AI? account model : system default
-   │      └─ not configured / no key → 422 Unprocessable Entity
+   2. LlmConfigResolverService.resolve(account)  -- BYO-AI? account model : system default
+   │      └- not configured / no key → 422 Unprocessable Entity
    │
-   3. capabilitiesFor(provider)                  ── clamp maxTokens; pick structured-output mode
-   │      └─ mode 'tool' → attach JSON Schema (Anthropic);  'json' → native JSON mode
+   3. capabilitiesFor(provider)                  -- clamp maxTokens; pick structured-output mode
+   │      └- mode 'tool' → attach JSON Schema (Anthropic);  'json' → native JSON mode
    │
    ▼
  ┌──────────────────── repair loop, up to 3 attempts ────────────────────┐
@@ -86,9 +86,9 @@ caller: StructuredLlmService.run({ key, vars, schema, accountId, validate? })
  │  4. LlmService.runWith(config, request)                                │
  │        └─ adapter.generate() ── HTTP → provider (timeout, retry/backoff) │
  │                                                                        │
- │  5. extractJson(text)            ── strip fences/prose, parse          │
- │  6. schema.safeParse(value)      ── Zod validate + normalize           │
- │  7. validate?(data)              ── optional semantic check            │
+ │  5. extractJson(text)            -- strip fences/prose, parse          │
+ │  6. schema.safeParse(value)      -- Zod validate + normalize           │
+ │  7. validate?(data)              -- optional semantic check            │
  │        (e.g. quotes really appear in the source, refs exist in graph)  │
  │                                                                        │
  │   any step fails ─→ build a repair message (the errors + bad output)   │
@@ -96,7 +96,7 @@ caller: StructuredLlmService.run({ key, vars, schema, accountId, validate? })
  │   all pass ───────→ record success + token usage, RETURN typed data    │
  └────────────────────────────────────────────────────────────────────────┘
    │
-   └─ still failing after 3 attempts → record failure → 422
+   └- still failing after 3 attempts → record failure → 422
       (note: content that's schema-valid but semantically unresolved is
        accepted on the final attempt; services degrade it gracefully)
 ```

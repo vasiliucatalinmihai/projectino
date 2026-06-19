@@ -258,7 +258,7 @@ export class DeliveryService {
     }
   }
 
-  // ── helpers ─────────────────────────────────────────────────────
+  // -- helpers -----------------------------------------------------
 
   private buildTree(allItems: DeliveryItem[]): DeliveryTree {
     const childrenByParent = new Map<number | null, DeliveryItem[]>();

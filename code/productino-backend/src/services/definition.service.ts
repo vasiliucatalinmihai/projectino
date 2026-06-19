@@ -110,7 +110,7 @@ export class DefinitionService {
     return saved;
   }
 
-  // ── prompt-input builders ────────────────────────────────────────
+  // -- prompt-input builders ----------------------------------------
 
   // The persisted coverage areas ARE the rubric snapshot from scoring, in
   // creation order — drive the PRD projection off them (no rubric const needed).

@@ -7,7 +7,7 @@ import { z } from 'zod';
  * in StructuredLlmService.
  */
 
-// ── helpers ──────────────────────────────────────────────────────────
+// -- helpers ----------------------------------------------------------
 
 const toText = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -75,7 +75,7 @@ const KINDS = ['feature', 'goal', 'rule', 'nfr', 'integration', 'data', 'platfor
 const IMPACTS = ['HIGH', 'MEDIUM', 'LOW'] as const;
 const SEVERITIES = ['high', 'medium', 'low'] as const;
 
-// ── extract-beliefs ───────────────────────────────────────────────────────────
+// -- extract-beliefs -----------------------------------------------------------
 
 export const ExtractBeliefsSchema = z
   .object({
@@ -114,7 +114,7 @@ export const ExtractBeliefsSchema = z
   .refine((o) => o.beliefs.length > 0, { message: 'expected at least one belief' });
 export type ExtractBeliefsResult = z.infer<typeof ExtractBeliefsSchema>;
 
-// ── score-coverage ─────────────────────────────────────────────────────────────
+// -- score-coverage -------------------------------------------------------------
 
 export const ScoreCoverageSchema = z.object({
   areas: arr(
@@ -137,7 +137,7 @@ export const ScoreCoverageSchema = z.object({
 }).refine((o) => o.areas.length > 0, { message: 'expected at least one coverage area' });
 export type ScoreCoverageResult = z.infer<typeof ScoreCoverageSchema>;
 
-// ── map-answers ────────────────────────────────────────────────────────────────
+// -- map-answers ----------------------------------------------------------------
 
 export const MapAnswersSchema = z
   .object({
@@ -160,7 +160,7 @@ export const MapAnswersSchema = z
   }));
 export type MapAnswersResult = z.infer<typeof MapAnswersSchema>;
 
-// ── synthesize-prd ──────────────────────────────────────────────────────────────
+// -- synthesize-prd --------------------------------------------------------------
 
 export const SynthesizePrdSchema = z
   .object({
@@ -193,7 +193,7 @@ export const SynthesizePrdSchema = z
   .refine((o) => o.summary.trim().length > 0, { message: 'summary is required' });
 export type SynthesizePrdResult = z.infer<typeof SynthesizePrdSchema>;
 
-// ── detect-conflicts ────────────────────────────────────────────────────────────
+// -- detect-conflicts ------------------------------------------------------------
 
 export const DetectConflictsSchema = z
   .object({
@@ -208,7 +208,7 @@ export const DetectConflictsSchema = z
   }));
 export type DetectConflictsResult = z.infer<typeof DetectConflictsSchema>;
 
-// ── generate-epics ──────────────────────────────────────────────────────────────
+// -- generate-epics --------------------------------------------------------------
 
 export const GenerateEpicsSchema = z
   .object({
@@ -218,7 +218,7 @@ export const GenerateEpicsSchema = z
   .refine((o) => o.epics.length > 0, { message: 'expected at least one epic' });
 export type GenerateEpicsResult = z.infer<typeof GenerateEpicsSchema>;
 
-// ── generate-epic-plan (decomposition only — no estimates; tolerant of weak nesting) ──
+// -- generate-epic-plan (decomposition only — no estimates; tolerant of weak nesting) --
 
 const RawTask = z.object({ title: str, description: str, phase: str }).loose();
 
@@ -249,7 +249,7 @@ export const GenerateEpicPlanSchema = z
   });
 export type GenerateEpicPlanResult = z.infer<typeof GenerateEpicPlanSchema>;
 
-// ── estimate-epic (per-task ranges, keyed back by index) ──────────────────────────
+// -- estimate-epic (per-task ranges, keyed back by index) --------------------------
 
 export const EstimateEpicSchema = z
   .object({
@@ -271,7 +271,7 @@ export const EstimateEpicSchema = z
   .refine((o) => o.estimates.length > 0, { message: 'expected at least one estimate' });
 export type EstimateEpicResult = z.infer<typeof EstimateEpicSchema>;
 
-// ── synthesize-proposal (prose only) ─────────────────────────────────────────────
+// -- synthesize-proposal (prose only) ----─────────────────────────────────────────
 
 export const SynthesizeProposalSchema = z.object({
   intro: str,

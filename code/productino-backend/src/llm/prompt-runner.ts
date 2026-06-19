@@ -77,7 +77,7 @@ export interface PromptRunner {
   run(accountId: number, req: LlmRequest): Promise<LlmResult>;
 }
 
-// ── Errors ──────────────────────────────────────────────────────────────────
+// -- Errors ------------------------------------------------------------------
 
 /** No runnable model for the account (BYO on with nothing active, or no system default). */
 export class LlmNotConfiguredError extends Error {
