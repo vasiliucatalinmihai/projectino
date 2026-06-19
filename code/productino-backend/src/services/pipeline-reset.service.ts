@@ -88,7 +88,7 @@ export class PipelineResetService {
         return this.rollbackStage(projectId, ProjectStage.DEFINITION);
       case 'proposal':
         await this.proposals.deleteMany({ projectId });
-        return;
+        return this.rollbackStage(projectId, ProjectStage.PLANNING);
     }
   }
 

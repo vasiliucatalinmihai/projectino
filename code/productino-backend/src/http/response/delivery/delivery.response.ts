@@ -22,3 +22,13 @@ export class DeliveryResponse {
     this.totalHigh = tree.totalHigh;
   }
 }
+
+/** The delivery plan as a shareable markdown document. */
+export class DeliveryDocResponse {
+  @ApiProperty({ description: 'Delivery plan markdown (epics → stories → tasks with estimates)' })
+  markdown: string;
+
+  constructor(markdown: string) {
+    this.markdown = markdown;
+  }
+}

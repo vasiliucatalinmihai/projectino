@@ -1,25 +1,25 @@
 # productino
 
 > AI-assisted **discovery-to-delivery** engine for a software outsourcing / agency shop.
-> This file is the product brief + roadmap — give it to any Claude session for full context.
+> This file is the product brief + current state — hand it to any session for full context.
 
 ## The one-liner
 
 Turn a vague client briefing into a scoped, costed, defensible product definition. Drop in
-the brief (a big text blob or a meeting transcript); the app builds a structured picture of
-the project, scores how well-defined it is, surfaces what's missing, and produces the exact
-questions to ask the client. Feed the answers back; it converges. Once it's confident enough,
-it emits the PRD, the tasks/roadmap, and the proposal.
+the brief (a text blob or a meeting transcript); the app builds a structured picture of the
+project, scores how well-defined it is, surfaces what's missing, and produces the exact
+questions to ask the client. Paste the answers back; it converges. Once confident enough, it
+emits the PRD, the delivery plan, and the priced proposal.
 
 ## The core insight
 
 This is **not** a document generator — ChatGPT writes a nice PRD today. The value is the AI
 **knowing what it doesn't know yet**, and forcing ambiguity out of the briefing *before* the
-agency commits to a (often fixed-price) deal. In outsourcing, margin dies on scope creep and
-misunderstood requirements. A tool that systematically surfaces gaps, soft assumptions, and
-risks early — and *measures* when you've asked enough — is the whole point.
+agency commits to a (often fixed-price) deal. Margin dies on scope creep; a tool that
+systematically surfaces gaps, soft assumptions and risks early — and *measures* when you've
+asked enough — is the whole point.
 
-The product is a **convergence engine**, framed as one loop with a confidence gate:
+It's a **convergence engine**: one loop with a confidence gate.
 
 ```
    ┌──────────────── new info can re-enter at ANY stage ────────────────┐
@@ -27,7 +27,7 @@ The product is a **convergence engine**, framed as one loop with a confidence ga
 Brief → Extract beliefs → Score coverage → (gate: defined enough?) ─no─→ Curate questions
          (status +          (per category +        │ yes                  (rank, dedupe,
           provenance)        rollup score)         ↓                       + proposed default)
-                                          Definition → Estimate → Proposal
+                                          Definition → Plan → Proposal
                                                                      ↑
                                        client answers (free text) ───┘
                                        re-extract → re-score → coverage VISIBLY rises
@@ -36,245 +36,120 @@ Brief → Extract beliefs → Score coverage → (gate: defined enough?) ─no�
 The **gate** (when to stop asking) and the **back-edge** (each round measurably converges)
 are what make this a tool, not a chatbot.
 
----
-
 ## The model: a Belief Graph (the source of truth)
 
-The project is **one graph**. But unlike a plain knowledge graph, every node carries an
-**epistemic envelope** — *how we know it, how sure we are, and from where* — and the graph
-computes a **convergence score**. PRDs, question docs, task lists, and proposals are merely
-**views** projected from it; no copy-paste drift.
-
-### Layers (by epistemic role, not a flat list of node types)
+The project is **one graph**. Every node carries an **epistemic envelope** — *how we know it,
+how sure we are, from where* — and the graph computes a **convergence score**. PRDs, question
+docs, plans and proposals are **views** projected from it; no copy-paste drift.
 
 ```
-EVIDENCE         immutable — "what was actually said"
-  Source ──< Span                      brief / transcript / email → quoted fragments
-
-UNDERSTANDING    the belief graph — the heart, where convergence happens
-  Requirement (kind: goal|feature|rule|nfr|integration-need|data|platform|stakeholder)
-  Assumption · Question · Decision · Risk · Conflict
-      every node: provenance→Span[], status, confidence, round
-  CoverageArea  (rubric category → rollup score)   ← the convergence engine
-
-DELIVERY         DERIVED — only built once Understanding clears the gate
-  Epic → Story → Task · Estimate · Dependency · Roadmap
-      each links UP to the Requirement(s) that justify it
-
-PRESENTATION     pure views (projections, never authored directly)
-  PRD · Client Question Doc · Architecture sketch · Proposal / SOW
+EVIDENCE       immutable — "what was actually said"
+  Source ──< quoted spans                brief / transcript / answers
+UNDERSTANDING  the belief graph — where convergence happens
+  BeliefNode (REQUIREMENT|ASSUMPTION|RISK|DECISION; kind: feature|goal|rule|nfr|…)
+  Question · Conflict · every node: provenance, status, confidence, round
+  CoverageArea (rubric category → rollup score)   ← the convergence engine
+DELIVERY       DERIVED — built once Understanding clears the gate
+  Epic → Story → Task (ranged estimates, MVP/Phase 2/Later phasing)
+PRESENTATION   pure views: PRD · Client question doc · Delivery plan · Proposal / SOW
 ```
 
-### The three upgrades that make it a scoping tool (not just an ontology)
+Three upgrades make it a scoping tool, not just an ontology:
 
-1. **Provenance** — every node links to the Span(s) in the source that produced it. Answers
-   "*why do we believe this?*" — the defense in a fixed-price scope dispute.
+1. **Provenance** — every node links to the source span(s) that produced it ("why do we
+   believe this?"); extraction grades quotes and downgrades ungrounded ones to `ASSUMED`.
 2. **Epistemic status** — `stated | inferred | assumed | confirmed | rejected | contradicted`.
-   A transcript's *"we'd probably want…"* becomes an `inferred`, low-confidence belief — never
-   silently promoted to a committed feature.
-3. **Coverage + gate** — each `CoverageArea` rolls up a confidence score; the project-level
-   rollup is the "defined enough?" gate. This is the measurable convergence that is the
-   differentiator.
+   A transcript's *"we'd probably want…"* becomes an `inferred`, low-confidence belief.
+   `confidence` is capped by status so a soft default can't inflate the gate.
+3. **Coverage + gate** — each `CoverageArea` rolls up a weighted confidence; the project-level
+   rollup is the "defined enough?" gate (default threshold 0.70, overridable with rationale).
 
-### Node envelope (every Understanding node wears this)
+**Conflicts are first-class** — contradictions between beliefs are detected and tracked
+(`open | resolved`) rather than hidden.
 
-```json
-{
-  "id": "req-subscriptions",
-  "kind": "feature",
-  "name": "Subscriptions",
-  "description": "Recurring monthly billing",
-  "status": "inferred",          // stated|inferred|assumed|confirmed|rejected|contradicted
-  "confidence": 0.55,            // 0..1
-  "provenance": [
-    { "sourceId": "transcript-1", "span": [1840, 1902],
-      "quote": "we'll probably need people to pay every month" }
-  ],
-  "round": 1,                    // which question round this entered/last changed
-  "coverageArea": "billing"
-}
-```
+## Stages & the LLM pipeline
 
-`"probably need"` → `status: inferred`, `confidence: 0.55`. The whole product flows from
-keeping soft beliefs visibly soft until the client confirms them.
+`Project.stage`: `BRIEFING → GAP_ANALYSIS ⇄ AWAITING_CLIENT → DEFINITION → PLANNING → PROPOSAL`.
+Each generate step sets its stage and clears everything downstream (so re-running upstream
+regresses the stage); the GAP_ANALYSIS ⇄ AWAITING_CLIENT back-edge carries the convergence loop.
 
-### CoverageArea (the convergence engine)
+Every LLM call uses structured output (typed JSON, validated by a Zod schema with a bounded
+repair loop). Prompts live as `.md` files in `src/prompts/` (frontmatter + body), are synced
+into the DB as versioned rows, and accrue run stats. Implemented calls:
 
-```json
-{
-  "id": "area-compliance",
-  "name": "Compliance & Data Protection",
-  "weight": "high",              // a compliance gap hurts margin more than a nice-to-have
-  "rollupConfidence": 0.2,       // weighted over its requirements/assumptions
-  "status": "underdefined",      // underdefined | thin | adequate | solid
-  "openQuestions": ["q-gdpr-residency", "q-pii-retention"]
-}
-```
+- `extract-beliefs` — source → typed belief nodes with status/confidence/provenance.
+- `score-coverage` — beliefs + rubric → per-area scores + ranked questions (each with an
+  assumed-answer default).
+- `map-answers` — client reply → answers mapped onto open questions (folded into round n+1).
+- `detect-conflicts` — contradictions between beliefs.
+- `synthesize-prd` — confident graph → PRD (scope, stories, NFRs, assumptions, out-of-scope,
+  risk register).
+- `generate-epics` then per-epic `generate-epic-plan` (decompose, no numbers) + `estimate-epic`
+  (size all of an epic's tasks together — separate estimation call improves consistency).
+- `synthesize-proposal` — prose only; phases/days/costs computed deterministically from the
+  plan (day-rate + buffer from Settings), never hallucinated.
 
-The fixed **rubric** = the taxonomy of what a buildable software project needs:
-functional scope · user roles & personas · core flows · non-functionals (perf, scale,
-security, **GDPR/EU compliance**) · integrations & external systems · data model & ownership
-/ migration · platforms & devices · constraints (budget, deadline, fixed-vs-flexible, locked
-tech) · stakeholders & decision-makers · success metrics / definition of done · explicit
-assumptions & out-of-scope.
+The PRD, client question doc, delivery plan and proposal each export to markdown.
 
-### Conflict is first-class (graphs hide contradictions unless you model them)
+## The rubric (per-project)
 
-```json
-{
-  "id": "conflict-tenancy",
-  "between": ["assumption-single-tenant", "req-org-switching"],
-  "description": "Single-tenant assumed, but org-switching requirement implies multi-tenant",
-  "status": "open"               // open | resolved
-}
-```
+The rubric is the taxonomy of what a buildable project must define (functional scope, roles,
+data/migration, integrations, NFRs, compliance/GDPR, platforms, localization, operations,
+acceptance, constraints, stakeholders, success metrics, assumptions/out-of-scope). It lives in
+`RubricService` as a default catalog; each project may store `{ enabled, overrides }` in its
+`rubric` JSON column (null = full default). Scoring, extraction and the gate all run against the
+project's *effective* rubric.
 
----
+## LLM architecture (provider-agnostic)
 
-## The flows (each maps to a stage + an LLM boundary)
+- **Bring-your-own-AI.** Calls route to the account's configured model, resolved by
+  `LlmConfigResolverService` — provider may be **anthropic / openai / deepseek / qwen / gemini**
+  (or the system-default model when BYO is off). Keep prompts and parsing provider-neutral.
+- **Structured outputs everywhere** — Anthropic uses strict tool-use; others use native JSON
+  mode; the Zod schemas + repair loop are the universal fallback.
+- **Per-model usage** — `AiModel` carries lifetime `runCount`/`tokensIn`/`tokensOut`, bumped on
+  each successful call; per-project token usage is also summed from logged prompt runs.
+- **No premature retrieval** — a single briefing fits in context; no vector DB until the
+  cross-project KnowledgeBase exists.
 
-The `Project.stage` enum drives the spine:
-`BRIEFING → GAP_ANALYSIS → AWAITING_CLIENT → DEFINITION → PLANNING → DELIVERY`
-(with the back-edge GAP_ANALYSIS ⇄ AWAITING_CLIENT carrying the convergence loop).
+## Cross-cutting
 
-**1. Ingest (BRIEFING).** Store the raw source immutably. One LLM **extraction** call turns
-it into Understanding nodes — *with status + confidence + provenance spans*. Not a summary; a
-typed, traceable belief set. Output is versioned (round 1).
-→ *LLM boundary:* source → nodes[] (tool-use, typed JSON). Cheaper model; it's extraction.
+- **Multi-tenant.** Accounts (tenants) + a platform/system account. Super admins cross
+  accounts and **impersonate** a tenant (mints a token for that account's admin). Permissions:
+  `SUPER_ADMIN, ADMIN, VIEW_ONLY, RUN_LLM, UPDATE_SETTINGS, MANAGE_PROMPTS, RESET_PROJECT`.
+- **Client outside the system.** The client never logs in: client-facing artifacts are
+  exports, answer ingestion is a paste.
+- **Versioning / rounds.** Convergence is measured per round so you can show "what your answers
+  changed"; pipeline-reset cascades staleness when an upstream step re-runs.
 
-**2. Gap analysis (GAP_ANALYSIS) — the heart.** Score the graph against the rubric: per
-`CoverageArea` confidence + evidence + gaps; each gap emits a candidate Question with a
-**proposed default answer**. Compute the weighted project rollup → the gate.
-→ *LLM boundary:* nodes + rubric → CoverageArea scores + Questions (Opus, tool-use). Cache the
-rubric + project context. **This is the screen that sells the product: a coverage map.**
+## Roadmap
 
-**3. Curate questions → client doc (AWAITING_CLIENT).** Don't dump 40 questions. Rank by
-**impact × uncertainty**, group, dedupe; consultant edits/includes/excludes (human-in-loop).
-Each question ships its **assumed answer** ("we'll assume web-only unless told otherwise").
-Export a clean **client-facing** doc; internal scores stay hidden.
+- **Phase 5 — Cross-project KnowledgeBase.** Reusable patterns, estimates calibrated to this
+  team's velocity, "questions that always end up mattering." Retrieval is introduced here.
+- **Phase 6 — Richer intake & export.** File/transcript/URL ingestion beyond paste;
+  Jira/Linear/Notion export. (Change-impact traversal view is still a future nicety.)
 
-**4. Ingest answers, re-converge (back to GAP_ANALYSIS).** Consultant pastes the client's
-free-text reply. LLM **maps answers onto open questions** (out of order, partial, answering
-things nobody asked — all normal), folds them into Understanding round *n+1*, re-scores. Show
-the **delta** ("Compliance 20% → 75%"). Below threshold → generate a *smaller* round; at/above
-→ unlock DEFINITION. Consultant can override the gate (recorded as "proceeding at 78%").
+## Current implementation
 
-**5. Definition / PRD (DEFINITION).** Project the confident graph into the spec: scope, user
-stories + acceptance criteria, NFRs, and — the contractual armor — **explicit assumptions,
-out-of-scope, and a risk register**, each traceable to its source span. Versioned, editable,
-then locked.
+Monorepo under `code/`, orchestrated by Docker Compose + the `./pd` helper (`./pd start`,
+`./pd exec <svc> …`, `./pd build`, `./pd logs`). Run dev commands inside containers via `pd`.
 
-**6. Estimate & plan (PLANNING).** Project Definition → Epic→Story→Task with **ranged**
-estimates (`5–8d`, never false-precision singles), dependencies, MVP-vs-later phasing. Later:
-calibrate to *this shop's* velocity via cross-project memory.
+- **Backend** (`code/productino-backend`): NestJS + Prisma + Postgres, flat folders —
+  `entities/` (active-record, extend `BaseEntity`), `repository/` (`PrismaRepository<T,…>` +
+  concrete repos), `services/`, `llm/` (adapters per provider, resolver, `StructuredLlmService`,
+  Zod `schemas/`), `prompts/` (`.md`), `http/` (`controller/`, `request/`, `response/`,
+  `guards/`, `middleware/`, `decorators/`). Swagger at `/api/docs`.
+- **Frontend** (`code/productino-frontend`): Nuxt 3 + Vue 3 + Tailwind, dark terminal theme.
+  Project page is the cockpit (pipeline rail + next-step + rubric + a stage deck switching the
+  belief graph / definition / delivery / proposal sections). Other pages: dashboard, accounts,
+  clients, projects, users, ai-models, prompts, settings, account.
+- **DB workflow:** `prisma db push` (no migration files). After a schema change:
+  `./pd exec backend yarn prisma:push`. Seed: `yarn seed`. Seeded users in `README.md`
+  (`super@productino.local` super admin, `admin@productino.local / admin123`,
+  `viewer@productino.local / viewer123`).
+- nginx proxies `dev.production.io` / `dev-api.production.io`; staging uses
+  `docker-compose.staging.yml` (Let's Encrypt via acme.sh into `docker/nginx/certs`).
 
-**7. Proposal / SOW (branches off DEFINITION).** Same dataset → priced, phased client
-proposal that reuses assumptions/out-of-scope verbatim. Highest felt value; build after the
-loop works.
-
-### Change-impact analysis (the payoff of a graph)
-
-```
-New requirement / changed answer → locate node → traverse edges →
-  affected Requirements → affected Stories → affected Tasks → triggered Risks →
-  estimated scope delta → updated roadmap
-```
-
-A flat-document tool can never do this; the belief graph does it by traversal.
-
----
-
-## Cross-cutting (bake in from day one)
-
-- **Traceability** — every score, question, and PRD line links back to its source span. Cheap
-  at extraction, invaluable in disputes.
-- **Versioning / rounds** — Understanding is append-and-revert friendly; convergence is
-  measured per round so you can always show "what your answers changed."
-- **Client outside the system** — in MVP the client never logs in: client-facing artifacts
-  are *exports*, answer ingestion is a *paste*. Keeps the build small and matches reality.
-- **Client-facing vs internal** — questions/scores have a curation + redaction step; internal
-  confidence is never exported.
-
-## LLM architecture
-
-- **Claude.** Opus for heavy reasoning (extraction-with-judgment, gap scoring, PRD synthesis);
-  a cheaper/faster model for formatting/redaction. Every stage uses **structured outputs /
-  tool-use** → typed JSON (nodes, scores, questions, tasks), never prose to re-parse.
-- **Prompt caching** — the rubric + project context are reused across every call in a round.
-- **No premature retrieval** — a single briefing fits in context; skip a vector DB until the
-  cross-project **KnowledgeBase** (reusable patterns, past estimates, the shop's stack) exists.
-- **Single-writer rounds, multi-lens reads** — instead of many agents concurrently mutating the
-  graph, specialized *read-only lenses* (compliance, estimation, conflict-detector) **propose**
-  changes; one merge step applies them with provenance. Conflicts stay first-class, not races.
-
----
-
-## Roadmap (phased)
-
-### Phase 0 — Foundation (largely built)
-NestJS + Prisma + Postgres; entities/repository/services/http layers; JWT auth + permissions
-(`ADMIN`, `VIEW_ONLY`, `RUN_LLM`, `UPDATE_SETTINGS`); `Project` CRUD with the `stage` enum;
-Nuxt 3 frontend (dark terminal theme), admin grids; nginx + `pd` helper; Swagger.
-
-### Phase 1 — MVP: the convergence loop (the differentiator)
-The thinnest thing that proves the value. **Ingest → extract beliefs → score coverage →
-curated questions w/ defaults → paste answers → re-converge → PRD.**
-- Belief Graph schema: `Source`/`Span`, Understanding nodes (envelope: status, confidence,
-  provenance, round), `CoverageArea`, `Question`, `Assumption`.
-- 3 LLM calls (tool-use): **extract**, **score+question**, **synthesize PRD**. Prompt-cached
-  rubric. `RUN_LLM`-gated.
-- UI: coverage map (the hero screen), question curation + client-doc export, answer paste +
-  visible delta, PRD view.
-- Re-entry + versioning from the start.
-
-### Phase 2 — Definition hardening
-First-class `Risk`, `Decision`, `Conflict` nodes + conflict detection; assumptions/out-of-scope/
-risk register as structured PRD sections; gate override with recorded rationale; full
-provenance UI ("why do we believe this?" → jump to source span).
-
-### Phase 3 — Delivery layer
-DELIVERY projection: Epic→Story→Task, ranged estimates, dependencies, MVP-vs-later phasing;
-change-impact traversal view.
-
-### Phase 4 — Proposal / SOW
-Priced, phased client proposal projected from Definition; reuses assumptions/out-of-scope
-verbatim. Likely the fastest-felt value.
-
-### Phase 5 — Cross-project KnowledgeBase
-Reusable patterns, calibrated estimates to *this team's* velocity, "questions that always end
-up mattering." Introduce retrieval here, not before. Gets smarter per project.
-
-### Phase 6 — Richer intake & export
-File/transcript/Figma/URL ingestion beyond paste; Jira/Linear/Notion export.
-
----
-
-## Why this beats "just use ChatGPT"
-
-1. **Rubric + coverage scoring + a gate** — measurable convergence, not vibes.
-2. **Provenance + epistemic status** — soft beliefs stay soft; every claim is traceable.
-3. **One belief graph, many views** — PRD, tasks, and proposal can't drift apart.
-4. **Assumption / risk / conflict surfacing** — directly protects margin.
-5. **Change-impact by traversal** — impossible for a flat-document tool.
-6. **Cross-project memory** — estimates and questions calibrated to the team.
-
-## Principle
-
-> The Belief Graph is the source of truth — and it records not just *what* the project is, but
-> *how sure we are* and *why*. PRDs, stories, tasks, estimates, roadmaps, and proposals are
-> all **views** over it. The product's job is to raise confidence, round by round, until the
-> graph is defined enough to safely commit to a price.
-
-## Current implementation (keep updated as built)
-
-Monorepo under `code/`, orchestrated by Docker Compose + the `pd` helper. Backend
-(`code/productino-backend`): NestJS + Prisma + Postgres, flat folders — `entities/`
-(active-record, extend `BaseEntity`), `repository/` (`PrismaRepository<T,…>` + concrete repos),
-`services/`, `http/` (`controller/`, `request/`, `response/`, `guards/`, `middleware/`,
-`validators/`, `decorators/`). Frontend (`code/productino-frontend`): Nuxt 3 + Vue 3 +
-Tailwind, dark terminal theme. nginx proxies `dev.production.io` / `dev-api.production.io`;
-Swagger at `/api/docs`. Run `./pd start`. Seeded users in `README.md`
-(`admin@productino.local / admin123`, `viewer@productino.local / viewer123`).
-
-> The gap-analysis pipeline (Phase 1) is in progress on the `prompt-manager` branch. Update
-> this section as the Belief Graph schema and the 3 LLM calls land.
+> The Belief Graph is the source of truth — *what* the project is, *how sure* we are, and
+> *why*. PRDs, plans, estimates and proposals are views over it. The product's job is to raise
+> confidence, round by round, until the graph is safe to price.

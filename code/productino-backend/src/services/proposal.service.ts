@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ProjectStage } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
 import { Proposal, ProposalContent, ProposalPhase, User } from '../entities';
 import {
   ProductDefinitionRepository,
+  ProjectRepository,
   ProposalRepository,
   SettingRepository,
 } from '../repository';
@@ -26,6 +28,7 @@ export class ProposalService {
     private readonly proposals: ProposalRepository,
     private readonly settings: SettingRepository,
     private readonly structured: StructuredLlmService,
+    private readonly projectRepo: ProjectRepository,
   ) {}
 
   async latest(projectId: number, user: User): Promise<Proposal | null> {
@@ -83,7 +86,7 @@ export class ProposalService {
     };
 
     const version = (await this.proposals.countForProject(projectId)) + 1;
-    return this.proposals.create({
+    const proposal = await this.proposals.create({
       project: { connect: { id: projectId } },
       version,
       content,
@@ -92,6 +95,10 @@ export class ProposalService {
       totalLowCost,
       totalHighCost,
     } as any);
+
+    // The proposal is the terminal artifact — advance the project to PROPOSAL.
+    await this.projectRepo.update(projectId, { stage: ProjectStage.PROPOSAL } as any);
+    return proposal;
   }
 
   /** Client-facing markdown proposal. */

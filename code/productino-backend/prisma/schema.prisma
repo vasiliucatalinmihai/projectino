@@ -13,7 +13,7 @@ enum ProjectStage {
   AWAITING_CLIENT
   DEFINITION
   PLANNING
-  DELIVERY
+  PROPOSAL
 }
 
 // --- Belief Graph enums -----------------------------------------------------

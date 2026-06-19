@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { CoverageStatus, QuestionStatus } from '@prisma/client';
+import { CoverageStatus, ProjectStage, QuestionStatus } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
 import { BeliefNode, ProjectRound, User } from '../entities';
 import {
   BeliefNodeRepository,
   CoverageAreaRepository,
+  ProjectRepository,
   ProjectRoundRepository,
   QuestionRepository,
 } from '../repository';
@@ -21,6 +22,7 @@ export class CoverageService {
     private readonly coverageAreaRepository: CoverageAreaRepository,
     private readonly questionRepository: QuestionRepository,
     private readonly projectRoundRepository: ProjectRoundRepository,
+    private readonly projectRepository: ProjectRepository,
     private readonly structuredLlmService: StructuredLlmService,
     private readonly pipelineResetService: PipelineResetService,
     private readonly rubricService: RubricService,
@@ -94,6 +96,12 @@ export class CoverageService {
 
     // New coverage makes the PRD and everything built from it stale.
     await this.pipelineResetService.afterScoring(projectId);
+
+    // Reflect the convergence loop in the stage: open questions → awaiting the
+    // client's reply; none → back in gap analysis, ready to define. (Re-scoring
+    // cleared the PRD chain above, so regressing the stage here is correct.)
+    const nextStage = result.questions.length > 0 ? ProjectStage.AWAITING_CLIENT : ProjectStage.GAP_ANALYSIS;
+    await this.projectRepository.update(projectId, { stage: nextStage } as any);
 
     return round;
   }

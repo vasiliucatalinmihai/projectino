@@ -59,7 +59,8 @@ export function useAuth() {
     superToken.value = token.value; // keep the super session to return to
     token.value = res.accessToken;
     user.value = res.user;
-    if (import.meta.client) window.location.assign('/');
+    // Entering a tenant → land on its projects.
+    if (import.meta.client) window.location.assign('/projects');
   }
 
   /** Return from an impersonated session back to the super-admin session. */
@@ -68,7 +69,8 @@ export function useAuth() {
     token.value = superToken.value;
     superToken.value = null;
     user.value = null;
-    if (import.meta.client) window.location.assign('/');
+    // Back to the super-admin session → the dashboard.
+    if (import.meta.client) window.location.assign('/dashboard');
   }
 
   const isAuthenticated = computed(() => !!token.value);

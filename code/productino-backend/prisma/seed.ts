@@ -35,7 +35,7 @@ const PROJECTS = [
   { name: 'Globex CRM revamp', client: 'Globex', stage: ProjectStage.GAP_ANALYSIS, briefing: 'Replace the legacy CRM with a web app; migrate 12k accounts.' },
   { name: 'Initech client portal', client: 'Initech', stage: ProjectStage.DEFINITION, briefing: 'Self-service portal for invoices, tickets and document sharing.' },
   { name: 'Umbrella analytics dashboard', client: 'Umbrella Corp', stage: ProjectStage.PLANNING, briefing: 'Real-time KPI dashboards sourced from their data warehouse.' },
-  { name: 'Wayne logistics tracker', client: 'Wayne Enterprises', stage: ProjectStage.DELIVERY, briefing: 'Fleet + parcel tracking with live maps and ETA estimates.' },
+  { name: 'Wayne logistics tracker', client: 'Wayne Enterprises', stage: ProjectStage.PROPOSAL, briefing: 'Fleet + parcel tracking with live maps and ETA estimates.' },
 ];
 
 async function main() {

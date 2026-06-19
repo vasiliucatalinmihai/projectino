@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: false });
 
-const { login } = useAuth();
+const { login, user } = useAuth();
 
 const email = ref('');
 const password = ref('');
@@ -15,7 +15,8 @@ async function onSubmit() {
   loading.value = true;
   try {
     await login(email.value, password.value);
-    await navigateTo('/projects');
+    // Super admins land on the dashboard; everyone else on their projects.
+    await navigateTo(user.value?.isSuperAdmin ? '/dashboard' : '/projects');
   } catch (e: any) {
     error.value = e?.data?.message ?? 'Login failed';
   } finally {

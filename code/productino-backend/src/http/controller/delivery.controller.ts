@@ -13,7 +13,7 @@ import { DeliveryService, PipelineLockService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { User } from '../../entities';
 import { CurrentUser, RequirePermissions } from '../decorators';
-import { DeliveryResponse } from '../response/delivery';
+import { DeliveryDocResponse, DeliveryResponse } from '../response/delivery';
 
 @ApiTags('Delivery')
 @ApiBearerAuth('bearer')
@@ -39,6 +39,21 @@ export class DeliveryController {
     @CurrentUser() user: User,
   ): Promise<DeliveryResponse> {
     return new DeliveryResponse(await this.delivery.tree(projectId, user));
+  }
+
+  @Get('doc')
+  @RequirePermissions(PermissionKey.VIEW_ONLY)
+  @ApiOperation({
+    summary: 'Delivery plan as markdown',
+    description: 'Requires VIEW_ONLY. Epics → stories → tasks with estimates, for export/sharing.',
+  })
+  @ApiParam({ name: 'projectId', type: Number })
+  @ApiOkResponse({ type: DeliveryDocResponse })
+  async doc(
+    @Param('projectId', ParseIntPipe) projectId: number,
+    @CurrentUser() user: User,
+  ): Promise<DeliveryDocResponse> {
+    return new DeliveryDocResponse(await this.delivery.buildDoc(projectId, user));
   }
 
   @Post()

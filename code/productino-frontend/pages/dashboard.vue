@@ -21,6 +21,12 @@ const cards = computed(() => [
   { label: 'Projects', value: overview.value?.projectCount ?? 0 },
 ]);
 const stages = computed(() => overview.value?.stages ?? []);
+
+// Personal reminders — static, no backend. Edit this list directly.
+const reminders = [
+  'resolva lang over prompts',
+  'add a manual round for input extra info manually',
+];
 </script>
 
 <template>
@@ -62,6 +68,19 @@ const stages = computed(() => overview.value?.stages ?? []);
           </span>
         </div>
       </div>
+    </div>
+
+    <!-- Static reminders (no backend) -->
+    <div class="mt-6 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+      <div class="mb-4 font-mono text-xs uppercase tracking-wider text-neutral-500">
+        // reminders
+      </div>
+      <ul class="m-0 flex list-none flex-col gap-2 p-0">
+        <li v-for="(r, i) in reminders" :key="i" class="flex items-start gap-2.5 text-sm text-neutral-300">
+          <span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
+          {{ r }}
+        </li>
+      </ul>
     </div>
   </div>
 </template>

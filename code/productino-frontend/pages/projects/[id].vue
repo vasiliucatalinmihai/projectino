@@ -29,7 +29,7 @@ const STAGES = [
   'AWAITING_CLIENT',
   'DEFINITION',
   'PLANNING',
-  'DELIVERY',
+  'PROPOSAL',
 ];
 
 const { data: project, error, refresh } = await useAsyncData<Project | null>(
@@ -749,6 +749,17 @@ async function exportProposal() {
     extractError.value = e?.data?.message ?? 'Export failed';
   }
 }
+async function exportDelivery() {
+  extractError.value = '';
+  try {
+    const res = await useApi<{ markdown: string }>(`/projects/${projectId}/delivery/doc`);
+    docText.value = res.markdown;
+    docTitle.value = 'Delivery plan';
+    showDoc.value = true;
+  } catch (e: any) {
+    extractError.value = e?.data?.message ?? 'Export failed';
+  }
+}
 function money(n: number, cur: string): string {
   return `${cur} ${(n ?? 0).toLocaleString('en-US')}`;
 }
@@ -772,14 +783,17 @@ const STAGE_RAIL = [
   { key: 'AWAITING_CLIENT', label: 'Awaiting client', glyph: '↺', anchor: 'stage-belief' },
   { key: 'DEFINITION', label: 'Definition', glyph: '§', anchor: 'stage-definition' },
   { key: 'PLANNING', label: 'Planning', glyph: '☷', anchor: 'stage-delivery' },
-  { key: 'DELIVERY', label: 'Delivery', glyph: '⚑', anchor: 'stage-delivery' },
+  { key: 'PROPOSAL', label: 'Proposal', glyph: '€', anchor: 'stage-proposal' },
 ];
 const stageIndex = computed(() =>
   Math.max(0, STAGE_RAIL.findIndex((s) => s.key === (project.value?.stage ?? 'BRIEFING'))),
 );
+// Reaching the terminal stage (PROPOSAL) means the pipeline is complete, so that
+// node reads as done (✓) rather than "in progress".
+const isComplete = computed(() => stageIndex.value === STAGE_RAIL.length - 1);
 function railState(i: number): 'done' | 'current' | 'todo' {
   if (i < stageIndex.value) return 'done';
-  if (i === stageIndex.value) return 'current';
+  if (i === stageIndex.value) return isComplete.value ? 'done' : 'current';
   return 'todo';
 }
 
@@ -1140,7 +1154,8 @@ function goToStage(anchor: string) {
             </div>
             <p v-else class="text-sm text-neutral-500">{{ definition ? 'Not planned' : 'Generate a PRD first' }}</p>
           </div>
-          <div v-if="canRun || canReset" class="mt-3 flex flex-wrap gap-2" @click.stop>
+          <div v-if="canRun || canReset || delivery?.epics?.length" class="mt-3 flex flex-wrap gap-2" @click.stop>
+            <button v-if="delivery?.epics?.length" class="btn-ghost text-xs" @click="exportDelivery">Export</button>
             <button
               v-if="canRun"
               class="btn-primary text-xs"

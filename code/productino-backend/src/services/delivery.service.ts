@@ -79,6 +79,38 @@ export class DeliveryService {
     return this.buildTree(allItems);
   }
 
+  /** The delivery plan rendered as a shareable markdown document. */
+  async buildDoc(projectId: number, user: User): Promise<string> {
+    const project = await this.projects.findOne(projectId, user); // enforces tenancy
+    const tree = this.buildTree(await this.items.findAllForProject(projectId));
+
+    const days = (lo: number | null, hi: number | null): string => {
+      if (lo == null && hi == null) return '—';
+      return lo === hi ? `${lo}d` : `${lo ?? 0}–${hi ?? 0}d`;
+    };
+
+    const lines: string[] = [`# Delivery plan — ${project.name}`, ''];
+    if (!tree.epics.length) {
+      lines.push('_No delivery plan generated yet._');
+      return lines.join('\n');
+    }
+    lines.push(`**Total estimate: ${days(tree.totalLow, tree.totalHigh)}**`, '');
+
+    for (const epic of tree.epics) {
+      lines.push(`## ${epic.title} — ${days(epic.totalLow, epic.totalHigh)}`);
+      if (epic.description) lines.push('', epic.description);
+      for (const story of epic.children) {
+        lines.push('', `### ${story.title} — ${days(story.totalLow, story.totalHigh)}`);
+        for (const task of story.children) {
+          const phase = task.phase ? ` _(${task.phase})_` : '';
+          lines.push(`- ${task.title} — ${days(task.estimateLow, task.estimateHigh)}${phase}`);
+        }
+      }
+      lines.push('');
+    }
+    return lines.join('\n').trim();
+  }
+
   async generate(projectId: number, user: User): Promise<DeliveryTree> {
     const project = await this.projects.findOne(projectId, user); // enforces tenancy
     const def = await this.definitions.findLatestForProject(projectId);
@@ -134,10 +166,9 @@ export class DeliveryService {
       ),
     );
 
-    // Move into PLANNING (don't regress DELIVERY).
-    if (project.stage !== ProjectStage.DELIVERY) {
-      await this.projectRepo.update(project.id, { stage: ProjectStage.PLANNING } as any);
-    }
+    // Move into PLANNING. Regenerating the plan clears any proposal below
+    // (afterDelivery), so dropping back from PROPOSAL → PLANNING is correct.
+    await this.projectRepo.update(project.id, { stage: ProjectStage.PLANNING } as any);
 
     // A regenerated plan makes any existing proposal stale.
     await this.reset.afterDelivery(project.id);
