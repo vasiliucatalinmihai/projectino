@@ -13,44 +13,38 @@ import { ProjectService } from './project.service';
 import { PipelineResetService } from './pipeline-reset.service';
 import { RubricArea, RubricService } from './rubric.service';
 
-/**
- * Phase 3 (the heart): score the belief graph against the rubric. The LLM judges
- * each rubric category's completeness and proposes questions (validated by
- * ScoreCoverageSchema); this service derives the per-area status, computes the
- * weighted project rollup (the gate), and snapshots a ProjectRound.
- */
 @Injectable()
 export class CoverageService {
   constructor(
-    private readonly projects: ProjectService,
-    private readonly nodes: BeliefNodeRepository,
-    private readonly coverage: CoverageAreaRepository,
-    private readonly questions: QuestionRepository,
-    private readonly rounds: ProjectRoundRepository,
-    private readonly structured: StructuredLlmService,
-    private readonly reset: PipelineResetService,
-    private readonly rubric: RubricService,
+    private readonly projectService: ProjectService,
+    private readonly beliefNodeRepository: BeliefNodeRepository,
+    private readonly coverageAreaRepository: CoverageAreaRepository,
+    private readonly questionRepository: QuestionRepository,
+    private readonly projectRoundRepository: ProjectRoundRepository,
+    private readonly structuredLlmService: StructuredLlmService,
+    private readonly pipelineResetService: PipelineResetService,
+    private readonly rubricService: RubricService,
   ) {}
 
   async run(projectId: number, user: User): Promise<ProjectRound> {
-    const project = await this.projects.findOne(projectId, user); // enforces tenancy
-    const nodes = await this.nodes.findAllForProject(projectId);
+    const project = await this.projectService.findOne(projectId, user); // enforces tenancy
+    const nodes = await this.beliefNodeRepository.findAllForProject(projectId);
     if (!nodes.length) {
       throw new BadRequestException('Extract beliefs before scoring coverage');
     }
 
-    const rubric = this.rubric.forProject(project);
+    const rubric = this.rubricService.forProject(project);
 
-    const result = await this.structured.run({
+    const result = await this.structuredLlmService.run({
       promptKey: PromptKey.SCORE_COVERAGE,
-      vars: { rubricList: this.rubric.promptList(rubric), beliefsList: this.beliefsList(nodes, rubric) },
+      vars: { rubricList: this.rubricService.promptList(rubric), beliefsList: this.beliefsList(nodes, rubric) },
       schema: ScoreCoverageSchema,
       accountId: user.accountId,
       subject: { type: 'project', id: project.id },
       scoreOf: (value) => this.weightedRollup(value, rubric),
     });
 
-    const nextIndex = (await this.rounds.findAllForProject(projectId)).length + 1;
+    const nextIndex = (await this.projectRoundRepository.findAllForProject(projectId)).length + 1;
     const areaByKey = new Map(
       result.areas.map((area) => [area.key.toLowerCase().trim(), area]),
     );
@@ -59,7 +53,7 @@ export class CoverageService {
     for (const area of rubric) {
       const confidence = areaByKey.get(area.key)?.rollupConfidence ?? 0;
       const status = this.statusFor(confidence);
-      await this.coverage.upsert(
+      await this.coverageAreaRepository.upsert(
         { projectId_key: { projectId, key: area.key } },
         {
           project: { connect: { id: projectId } },
@@ -74,14 +68,14 @@ export class CoverageService {
       );
     }
     // Drop coverage rows for areas no longer in the (possibly customized) rubric.
-    await this.coverage.deleteMany({ projectId, key: { notIn: rubric.map((area) => area.key) } } as any);
+    await this.coverageAreaRepository.deleteMany({ projectId, key: { notIn: rubric.map((area) => area.key) } } as any);
 
     const rollup = this.weightedRollup(result, rubric);
 
     // Regenerate the question set, preserving anything already answered by a client.
-    await this.questions.deleteMany({ projectId, status: { not: QuestionStatus.ANSWERED } });
+    await this.questionRepository.deleteMany({ projectId, status: { not: QuestionStatus.ANSWERED } });
     for (const question of result.questions) {
-      await this.questions.create({
+      await this.questionRepository.create({
         project: { connect: { id: projectId } },
         coverageKey: question.coverageKey,
         text: question.text,
@@ -92,19 +86,17 @@ export class CoverageService {
       } as any);
     }
 
-    const round = await this.rounds.create({
+    const round = await this.projectRoundRepository.create({
       project: { connect: { id: projectId } },
       index: nextIndex,
       rollupConfidence: rollup,
     } as any);
 
     // New coverage makes the PRD and everything built from it stale.
-    await this.reset.afterScoring(projectId);
+    await this.pipelineResetService.afterScoring(projectId);
 
     return round;
   }
-
-  // ── helpers ─────────────────────────────────────────────────────
 
   /** Weighted average of per-area confidence — the "defined enough?" gate value. */
   private weightedRollup(result: ScoreCoverageResult, rubric: RubricArea[]): number {
@@ -113,7 +105,7 @@ export class CoverageService {
     let weightTotal = 0;
     for (const area of rubric) {
       const confidence = byKey.get(area.key) ?? 0;
-      const weight = this.rubric.weightValue(area.weight);
+      const weight = this.rubricService.weightValue(area.weight);
       weightedSum += confidence * weight;
       weightTotal += weight;
     }

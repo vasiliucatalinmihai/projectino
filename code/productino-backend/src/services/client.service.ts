@@ -2,7 +2,6 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { ClientRepository, ProjectRepository } from '../repository';
 import { Client, User } from '../entities';
 
-// Service-level inputs/outputs (no HTTP DTOs).
 export interface CreateClientInput {
   name: string;
   email?: string | null;
@@ -25,7 +24,6 @@ export class ClientService {
   ) {}
 
   // Everyone is scoped to their own account; super admins reach other accounts
-  // by impersonating them (impersonation swaps the account context).
   private scope(user: User): Record<string, any> {
     return { accountId: user.accountId };
   }
@@ -43,7 +41,6 @@ export class ClientService {
     );
   }
 
-  /** Load a client, enforcing account ownership (super admin sees any). */
   async findOne(id: number, user: User): Promise<Client> {
     const client = await this.clients.findById(id);
     if (!client || client.accountId !== user.accountId) {

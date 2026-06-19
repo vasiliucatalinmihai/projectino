@@ -3,6 +3,8 @@ import { AccountRepository, SettingRepository } from '../repository';
 import { AI_MODEL_CATALOG_KEY, DEFAULT_MODEL_CATALOG, ModelCatalog } from '../common/ai-catalog';
 
 /**
+ * @todo get models from actual provider, this is dumb
+ *
  * Serves the provider → models catalog that drives the admin dropdowns.
  *
  * Stored as JSON in the system account's `AI_MODEL_CATALOG` setting so it's

@@ -22,29 +22,23 @@ export interface GenerateDefinitionInput {
   overrideReason?: string;
 }
 
-/**
- * Phase 5: project the confident Belief Graph into a versioned PRD. Gated on the
- * latest round's rollup — below the gate, generation requires an explicit
- * override (recorded on the definition). Output validated by SynthesizePrdSchema.
- */
 @Injectable()
 export class DefinitionService {
   constructor(
-    private readonly projects: ProjectService,
+    private readonly projectService: ProjectService,
     private readonly projectRepo: ProjectRepository,
-    private readonly nodes: BeliefNodeRepository,
-    private readonly coverage: CoverageAreaRepository,
-    private readonly questions: QuestionRepository,
-    private readonly rounds: ProjectRoundRepository,
-    private readonly definitions: ProductDefinitionRepository,
-    private readonly structured: StructuredLlmService,
-    private readonly reset: PipelineResetService,
+    private readonly beliefNodeRepository: BeliefNodeRepository,
+    private readonly coverageAreaRepository: CoverageAreaRepository,
+    private readonly questionRepository: QuestionRepository,
+    private readonly projectRoundRepository: ProjectRoundRepository,
+    private readonly productDefinitionRepository: ProductDefinitionRepository,
+    private readonly structuredLlmService: StructuredLlmService,
+    private readonly resetService: PipelineResetService,
   ) {}
 
-  /** Latest PRD for a project (null if never generated). */
   async latest(projectId: number, user: User): Promise<ProductDefinition | null> {
-    await this.projects.findOne(projectId, user);
-    return this.definitions.findLatestForProject(projectId);
+    await this.projectService.findOne(projectId, user);
+    return this.productDefinitionRepository.findLatestForProject(projectId);
   }
 
   async generate(
@@ -52,9 +46,9 @@ export class DefinitionService {
     user: User,
     input: GenerateDefinitionInput = {},
   ): Promise<ProductDefinition> {
-    const project = await this.projects.findOne(projectId, user); // enforces tenancy
+    const project = await this.projectService.findOne(projectId, user); // enforces tenancy
 
-    const allRounds = await this.rounds.findAllForProject(projectId);
+    const allRounds = await this.projectRoundRepository.findAllForProject(projectId);
     if (!allRounds.length) {
       throw new BadRequestException('Score coverage before generating a definition');
     }
@@ -74,12 +68,12 @@ export class DefinitionService {
     }
 
     const [nodes, areas, questions] = await Promise.all([
-      this.nodes.findAllForProject(projectId),
-      this.coverage.findAllForProject(projectId),
-      this.questions.findAllForProject(projectId),
+      this.beliefNodeRepository.findAllForProject(projectId),
+      this.coverageAreaRepository.findAllForProject(projectId),
+      this.questionRepository.findAllForProject(projectId),
     ]);
 
-    const content = await this.structured.run({
+    const content = await this.structuredLlmService.run({
       promptKey: PromptKey.SYNTHESIZE_PRD,
       vars: {
         coverageList: this.coverageList(areas),
@@ -92,8 +86,8 @@ export class DefinitionService {
       scoreOf: () => rollupConfidence,
     });
 
-    const version = (await this.definitions.countForProject(projectId)) + 1;
-    const saved = await this.definitions.create({
+    const version = (await this.productDefinitionRepository.countForProject(projectId)) + 1;
+    const saved = await this.productDefinitionRepository.create({
       project: { connect: { id: projectId } },
       version,
       content,
@@ -102,7 +96,6 @@ export class DefinitionService {
       overrideReason: belowGate && input.override ? (input.overrideReason ?? null) : null,
     } as any);
 
-    // Move into DEFINITION (don't regress later stages).
     if (
       project.stage === ProjectStage.BRIEFING ||
       project.stage === ProjectStage.GAP_ANALYSIS ||
@@ -111,8 +104,8 @@ export class DefinitionService {
       await this.projectRepo.update(project.id, { stage: ProjectStage.DEFINITION } as any);
     }
 
-    // A new PRD makes any existing delivery plan and proposal stale.
-    await this.reset.afterDefinition(project.id);
+    // A new PRD makes any existing delivery plan and proposal dumb.
+    await this.resetService.afterDefinition(project.id);
 
     return saved;
   }

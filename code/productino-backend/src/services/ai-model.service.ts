@@ -4,11 +4,8 @@ import { AiModel, User } from '../entities';
 import { LlmConfigResolverService, LlmService } from '../llm';
 import type { EffectiveModel, ResolvedLlmConfig } from '../llm';
 
-// Re-export so the `EffectiveModel` shape is still reachable via the services
-// barrel; the canonical definition lives with the LLM resolver.
 export type { EffectiveModel };
 
-// Service-level inputs/outputs (no HTTP DTOs).
 export interface CreateAiModelInput {
   label?: string | null;
   provider: string;
@@ -106,16 +103,13 @@ export class AiModelService {
 
   /**
    * Which model an account would use to process projects, given its BYO flag.
-   * Tenant users see their own account; super admins may target an accountId.
-   * Delegates to the LLM resolver so this and the actual call path agree.
    */
   effectiveForAccount(actingUser: User, accountId?: number): Promise<EffectiveModel> {
     return this.resolver.describe(this.scopeAccountId(actingUser, accountId));
   }
 
   /**
-   * Validate a model's stored credentials with a tiny live call. Never throws on
-   * a provider/auth failure — returns { ok:false, message } so the UI can show it.
+   * Validate a model's stored credentials with a tiny live call
    */
   async testConnection(id: number, actingUser: User): Promise<TestConnectionResult> {
     const model = await this.getScoped(id, actingUser);
@@ -168,7 +162,6 @@ export class AiModelService {
     return model;
   }
 
-  // Exactly one active model per account.
   private async setActive(id: number, accountId: number): Promise<AiModel> {
     await this.models.updateMany({ accountId }, { isActive: false });
     return this.models.update(id, { isActive: true });

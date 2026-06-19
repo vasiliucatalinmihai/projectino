@@ -123,7 +123,7 @@ export class ProjectGraphController {
     @Body() body: IngestAnswersRequest,
     @CurrentUser() user: User,
   ): Promise<BeliefGraphResponse> {
-    return this.mutate(projectId, user, () => this.answers.ingest(projectId, user, body.answers));
+    return this.mutate(projectId, user, () => this.answers.processAnswersText(projectId, user, body.answers));
   }
 
   @Post('conflicts')

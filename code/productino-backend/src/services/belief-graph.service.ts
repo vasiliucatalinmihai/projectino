@@ -18,7 +18,6 @@ import {
 } from '../repository';
 import { ProjectService } from './project.service';
 
-/** All layers of a project's Belief Graph, loaded together. */
 export interface ProjectGraph {
   projectId: number;
   sources: Source[];
@@ -29,34 +28,28 @@ export interface ProjectGraph {
   conflicts: Conflict[];
 }
 
-/**
- * Read-only access to a project's Belief Graph (Phase 1). Extraction, scoring
- * and the convergence loop that populate these tables arrive in later phases;
- * for now this assembles whatever exists (empty until then).
- */
 @Injectable()
 export class BeliefGraphService {
   constructor(
-    private readonly projects: ProjectService,
-    private readonly sources: SourceRepository,
-    private readonly nodes: BeliefNodeRepository,
-    private readonly coverage: CoverageAreaRepository,
-    private readonly questions: QuestionRepository,
-    private readonly rounds: ProjectRoundRepository,
-    private readonly conflictRepo: ConflictRepository,
+    private readonly projectService: ProjectService,
+    private readonly sourceRepository: SourceRepository,
+    private readonly beliefNodeRepository: BeliefNodeRepository,
+    private readonly coverageAreaRepository: CoverageAreaRepository,
+    private readonly questionRepository: QuestionRepository,
+    private readonly projectRoundRepository: ProjectRoundRepository,
+    private readonly conflictRepository: ConflictRepository,
   ) {}
 
-  /** Assemble the full graph for a project, enforcing tenancy via ProjectService. */
   async forProject(projectId: number, user: User): Promise<ProjectGraph> {
-    await this.projects.findOne(projectId, user); // throws if not in the user's account
+    await this.projectService.findOne(projectId, user); // throws if not in the user's account
 
     const [sources, coverageAreas, nodes, questions, rounds, conflicts] = await Promise.all([
-      this.sources.findAllForProject(projectId),
-      this.coverage.findAllForProject(projectId),
-      this.nodes.findAllForProject(projectId),
-      this.questions.findAllForProject(projectId),
-      this.rounds.findAllForProject(projectId),
-      this.conflictRepo.findAllForProject(projectId),
+      this.sourceRepository.findAllForProject(projectId),
+      this.coverageAreaRepository.findAllForProject(projectId),
+      this.beliefNodeRepository.findAllForProject(projectId),
+      this.questionRepository.findAllForProject(projectId),
+      this.projectRoundRepository.findAllForProject(projectId),
+      this.conflictRepository.findAllForProject(projectId),
     ]);
 
     return { projectId, sources, coverageAreas, nodes, questions, rounds, conflicts };

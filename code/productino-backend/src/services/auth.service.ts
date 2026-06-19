@@ -73,7 +73,6 @@ export class AuthService {
     return this.issueToken(fresh);
   }
 
-  /** Mint a JWT for a user (used by login and by super-admin impersonation). */
   async issueToken(user: User): Promise<IssuedToken> {
     const payload: JwtPayload = { sub: user.id, email: user.email };
     const accessToken = await this.jwt.signAsync(payload);

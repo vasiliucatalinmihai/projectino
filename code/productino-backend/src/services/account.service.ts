@@ -4,7 +4,6 @@ import { Account } from '../entities';
 import { PermissionKey } from '../common/permission-key';
 import { AuthService, IssuedToken } from './auth.service';
 
-// Service-level inputs/outputs (no HTTP DTOs).
 export interface CreateAccountInput {
   name: string;
   slug?: string | null;
@@ -19,7 +18,6 @@ export interface AccountWithStats {
   userCount: number;
 }
 
-/** Tenant (account) management — SUPER_ADMIN only (gated at the controller). */
 @Injectable()
 export class AccountService {
   constructor(
@@ -70,11 +68,6 @@ export class AccountService {
     return account;
   }
 
-  /**
-   * Issue a session token as a user inside the given account, so a super admin
-   * can "enter" a tenant. Prefers an ADMIN of that account, falling back to its
-   * first user.
-   */
   async impersonate(id: number): Promise<IssuedToken> {
     const account = await this.getOrThrow(id);
     const users = await this.users.findForAccount(id);
