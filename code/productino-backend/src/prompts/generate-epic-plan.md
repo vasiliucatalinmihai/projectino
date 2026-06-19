@@ -2,7 +2,7 @@
 key: generate-epic-plan
 description: Break one epic into stories and tasks (no estimates)
 temperature: 0
-maxTokens: 4000
+maxTokens: 10000
 ---
 You are a senior delivery lead at a software outsourcing agency. For the single EPIC below
 (one part of a larger product), produce its **stories** and, under each, the concrete **tasks**
