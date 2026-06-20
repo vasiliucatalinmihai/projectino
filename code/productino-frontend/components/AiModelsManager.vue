@@ -279,7 +279,7 @@ async function remove(m: AiModel) {
       </p>
     </div>
 
-    <p v-if="totals.runs" class="mb-3 text-xs text-neutral-500">
+    <p v-if="totals.runs" class="mb-3 break-words text-xs text-neutral-500">
       <span class="font-mono uppercase tracking-wider">// usage</span>
       <span class="ml-1 font-mono font-bold text-brand">{{ fmtInt(totals.total) }}</span> tokens
       <span class="text-neutral-600">({{ fmtInt(totals.tokensIn) }} in · {{ fmtInt(totals.tokensOut) }} out)</span>
@@ -355,7 +355,7 @@ async function remove(m: AiModel) {
           </span>
         </label>
         <p v-if="formError" class="m-0 text-sm text-red-400">{{ formError }}</p>
-        <div class="mt-1 flex justify-end gap-2">
+        <div class="mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" class="btn-ghost" @click="showForm = false">Cancel</button>
           <button type="submit" class="btn-primary" :disabled="saving">
             {{ saving ? 'Saving…' : 'Save' }}

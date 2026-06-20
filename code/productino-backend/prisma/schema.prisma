@@ -16,10 +16,6 @@ enum ProjectStage {
   PROPOSAL
 }
 
-// --- Belief Graph enums -----------------------------------------------------
-
-// Where a piece of raw input came from. The first briefing is BRIEFING; later
-// rounds add transcripts / emails / pasted client ANSWERS.
 enum SourceKind {
   BRIEFING
   TRANSCRIPT
@@ -27,8 +23,6 @@ enum SourceKind {
   ANSWERS
 }
 
-// A belief node's role in the Understanding layer. REQUIREMENT covers the
-// `kind` sub-types (feature/goal/rule/nfr/...); RISK/DECISION arrive in Phase 6.
 enum BeliefNodeType {
   REQUIREMENT
   ASSUMPTION
@@ -36,8 +30,6 @@ enum BeliefNodeType {
   DECISION
 }
 
-// How sure we are of a belief and where it stands. The core epistemic axis: a
-// transcript's "we'd probably want…" is INFERRED, not silently CONFIRMED.
 enum BeliefStatus {
   STATED
   INFERRED
@@ -47,7 +39,6 @@ enum BeliefStatus {
   CONTRADICTED
 }
 
-// Coverage of a rubric category, derived from its nodes' confidence.
 enum CoverageStatus {
   UNDERDEFINED
   THIN
@@ -61,8 +52,6 @@ enum QuestionImpact {
   LOW
 }
 
-// A question's lifecycle: proposed (OPEN) → curated in/out (INCLUDED/EXCLUDED)
-// → ANSWERED once the client replies.
 enum QuestionStatus {
   OPEN
   INCLUDED
@@ -70,29 +59,22 @@ enum QuestionStatus {
   ANSWERED
 }
 
-// A detected contradiction between two beliefs. Graphs hide contradictions
-// unless modelled explicitly — this makes them first-class.
 enum ConflictStatus {
   OPEN
   RESOLVED
 }
 
-// DELIVERY layer hierarchy: Epic → Story → Task.
 enum DeliveryLevel {
   EPIC
   STORY
   TASK
 }
 
-// A tenant: a company using the app. Users, projects and settings belong to one.
-// The system account (isSystem = true) hosts super admins who cross tenants.
 model Account {
   id        Int       @id @default(autoincrement())
   name      String
   slug      String?   @unique
   isSystem  Boolean   @default(false)
-  // When true, processing uses this account's own AI models/credentials;
-  // when false, the platform's default model is used. Super-admin controlled.
   bringYourOwnAi Boolean @default(false)
   users     User[]
   clients   Client[]
@@ -105,23 +87,17 @@ model Account {
   @@map("accounts")
 }
 
-// An LLM configuration an account can use when "bring your own AI" is enabled.
-// Exactly one per account is active at a time (the one used for processing).
 model AiModel {
   id        Int      @id @default(autoincrement())
   accountId Int
   account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   label     String?
-  provider  String   // e.g. anthropic, openai, google, azure-openai
-  model     String   // e.g. claude-opus-4-7, gpt-4o
+  provider  String
+  model     String
   apiKey    String?  @db.Text
-  baseUrl   String?  // optional custom endpoint / proxy
-  // Provider-specific knobs passed through on every call (e.g. temperature,
-  // Anthropic output_config/thinking, OpenAI response_format). Same shape for
-  // tenant models and the system default.
+  baseUrl   String?
   options   Json     @default("{}")
   isActive  Boolean  @default(false)
-  // Lifetime usage, incremented at call time (see StructuredLlmService).
   runCount   Int       @default(0)
   tokensIn   Int       @default(0)
   tokensOut  Int       @default(0)
@@ -133,8 +109,6 @@ model AiModel {
   @@map("ai_models")
 }
 
-// A client (the agency's customer) belonging to one account. Every project is
-// scoped to a client; the client carries the contact details for that engagement.
 model Client {
   id        Int       @id @default(autoincrement())
   accountId Int
@@ -157,13 +131,8 @@ model User {
   id              Int          @id @default(autoincrement())
   email           String       @unique
   name            String?
-  // Null until the user activates their account by setting a password.
   passwordHash    String?
-  // Inactive users cannot log in. New users start inactive and become active
-  // once they consume their activationToken.
   active          Boolean      @default(false)
-  // Opaque one-shot token used to set/reset a password (no email flow).
-  // Cleared once consumed.
   activationToken String?      @unique
   accountId       Int
   account         Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -175,8 +144,6 @@ model User {
   @@map("users")
 }
 
-// A permission is a row, not a hard-coded enum, so the set can grow without a
-// schema change. The `key` matches the PermissionKey enum used in code/guards.
 model Permission {
   id          Int      @id @default(autoincrement())
   key         String   @unique
@@ -187,8 +154,6 @@ model Permission {
   @@map("permissions")
 }
 
-// Simple key/value settings store for app-wide configuration that can be
-// edited at runtime and read anywhere in the project.
 model Setting {
   id          Int      @id @default(autoincrement())
   accountId   Int
@@ -203,8 +168,6 @@ model Setting {
   @@map("settings")
 }
 
-// Example domain model. Demonstrates the repository + active-record pattern.
-// A Project is one client engagement moving through the discovery pipeline.
 model Project {
   id          Int          @id @default(autoincrement())
   accountId   Int
@@ -213,12 +176,7 @@ model Project {
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   name         String
   stage        ProjectStage  @default(BRIEFING)
-  // Optional per-project override of the discovery rubric (RubricArea[]).
-  // null → the built-in default rubric (see common/rubric.ts).
   rubric       Json?
-  // Belief Graph (the project's source of truth). Raw inputs live in `sources`;
-  // `beliefNodes` + `coverageAreas` + `questions` are the Understanding layer;
-  // `rounds` snapshot convergence so deltas can be shown between question rounds.
   sources       Source[]
   beliefNodes   BeliefNode[]
   coverageAreas CoverageArea[]
@@ -236,10 +194,6 @@ model Project {
   @@map("projects")
 }
 
-// --- Belief Graph -----------------------------------------------------------
-
-// EVIDENCE layer: immutable raw input. The initial briefing is the first
-// Source (round 1); later client answers/transcripts are added as new Sources.
 model Source {
   id        Int        @id @default(autoincrement())
   projectId Int
@@ -254,11 +208,6 @@ model Source {
   @@map("sources")
 }
 
-// UNDERSTANDING layer: one polymorphic table for every belief, wearing the
-// epistemic envelope (status + confidence + provenance + round). `kind`
-// sub-types a REQUIREMENT (feature|goal|rule|nfr|integration|data|platform|
-// stakeholder); `extra` holds type-specific fields (e.g. risk severity).
-// `provenance` is [{ sourceId, span:[start,end], quote }] — why we believe it.
 model BeliefNode {
   id          Int            @id @default(autoincrement())
   projectId   Int
@@ -281,8 +230,6 @@ model BeliefNode {
   @@map("belief_nodes")
 }
 
-// The convergence engine: one rubric category, with a confidence rolled up from
-// its belief nodes. The weighted project rollup is the "defined enough?" gate.
 model CoverageArea {
   id               Int            @id @default(autoincrement())
   projectId        Int
@@ -301,8 +248,6 @@ model CoverageArea {
   @@map("coverage_areas")
 }
 
-// A clarifying question with its proposed default answer. Curated in/out, then
-// ANSWERED when the client replies (answer folded back into a new round).
 model Question {
   id            Int            @id @default(autoincrement())
   projectId     Int
@@ -321,8 +266,6 @@ model Question {
   @@map("questions")
 }
 
-// Snapshot of the weighted project rollup at the end of a round, so the UI can
-// show the convergence delta ("Compliance 20% → 75%") between rounds.
 model ProjectRound {
   id               Int      @id @default(autoincrement())
   projectId        Int
@@ -336,8 +279,6 @@ model ProjectRound {
   @@map("project_rounds")
 }
 
-// A contradiction the LLM found between two beliefs. Self-contained (stores the
-// belief names) so it renders even after re-extraction churns node ids.
 model Conflict {
   id        Int            @id @default(autoincrement())
   projectId Int
@@ -355,9 +296,6 @@ model Conflict {
   @@map("conflicts")
 }
 
-// PRESENTATION layer: a client-facing, priced proposal / SOW. Versioned. Costs
-// are computed deterministically from the delivery plan (day-rate + buffer from
-// Settings); `content` holds the full structured proposal (phases, prose, etc.).
 model Proposal {
   id            Int      @id @default(autoincrement())
   projectId     Int
@@ -375,9 +313,6 @@ model Proposal {
   @@map("proposals")
 }
 
-// DELIVERY layer: Epic → Story → Task, projected from the PRD. One polymorphic
-// table with a self-relation (parent) and a `level`. Ranged estimates (days)
-// live on tasks; story/epic totals are rolled up on read. `phase` = MVP/later.
 model DeliveryItem {
   id           Int            @id @default(autoincrement())
   projectId    Int
@@ -400,10 +335,6 @@ model DeliveryItem {
   @@map("delivery_items")
 }
 
-// PRESENTATION layer: the PRD, projected from the confident graph. Versioned;
-// `content` is the structured spec (scope, user stories, NFRs, assumptions,
-// out-of-scope, risk register). Records the rollup it was generated at and
-// whether the consultant overrode the confidence gate.
 model ProductDefinition {
   id                     Int      @id @default(autoincrement())
   projectId              Int
@@ -420,10 +351,6 @@ model ProductDefinition {
   @@map("product_definitions")
 }
 
-// --- Prompt manager ---------------------------------------------------------
-
-// One row per use case (keyed by a stable PromptKey). `activeVersionId` is the
-// pinned "live" version resolved at runtime.
 model Prompt {
   id              Int                @id @default(autoincrement())
   key             String             @unique
@@ -437,8 +364,6 @@ model Prompt {
   @@map("prompts")
 }
 
-// Immutable snapshot of a prompt's text + model config, created whenever the
-// source file's checksum changes.
 model PromptVersion {
   id        Int      @id @default(autoincrement())
   promptId  Int
@@ -455,7 +380,6 @@ model PromptVersion {
   @@map("prompt_versions")
 }
 
-// Phase 3 (A/B). Present in the schema but not yet used by any code.
 model PromptExperiment {
   id        Int      @id @default(autoincrement())
   promptId  Int
@@ -468,7 +392,6 @@ model PromptExperiment {
   @@map("prompt_experiments")
 }
 
-// Phase 2 (outcome log). Present in the schema but not yet used by any code.
 model PromptRun {
   id           Int      @id @default(autoincrement())
   promptKey    String
@@ -480,8 +403,6 @@ model PromptRun {
   latencyMs    Int?
   tokensIn     Int?
   tokensOut    Int?
-  // The provider/model that actually served the run (account-configured, not
-  // the prompt version). Null when the call failed before a model responded.
   provider     String?
   model        String?
   score        Float?

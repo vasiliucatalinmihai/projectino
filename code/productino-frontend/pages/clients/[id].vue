@@ -135,12 +135,12 @@ async function saveProject() {
     <p v-if="error || !client" class="mt-4 text-sm text-neutral-500">Client not found.</p>
 
     <template v-else>
-      <div class="mb-5 mt-2 flex items-start justify-between">
-        <div>
+      <div class="mb-5 mt-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
           <div class="kicker">// client</div>
-          <h1 class="m-0 text-2xl font-bold tracking-tight text-white">{{ client.name }}</h1>
+          <h1 class="m-0 break-words text-2xl font-bold tracking-tight text-white">{{ client.name }}</h1>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-col gap-2 sm:flex-row">
           <button class="btn-danger" @click="remove">Delete</button>
           <button class="btn-primary" @click="openEdit">Edit</button>
         </div>
@@ -166,7 +166,7 @@ async function saveProject() {
         <label class="field">Name<input v-model="projectForm.name" class="inp" required /></label>
         <label class="field">Briefing<textarea v-model="projectForm.briefing" rows="4" class="inp" /></label>
         <p v-if="projectError" class="m-0 text-sm text-red-400">{{ projectError }}</p>
-        <div class="mt-1 flex justify-end gap-2">
+        <div class="mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" class="btn-ghost" @click="showProjectForm = false">Cancel</button>
           <button type="submit" class="btn-primary" :disabled="projectSaving">
             {{ projectSaving ? 'Saving…' : 'Save' }}
@@ -183,7 +183,7 @@ async function saveProject() {
         <label class="field">Address<input v-model="form.address" class="inp" /></label>
         <label class="field">Notes<textarea v-model="form.notes" rows="3" class="inp" /></label>
         <p v-if="formError" class="m-0 text-sm text-red-400">{{ formError }}</p>
-        <div class="mt-1 flex justify-end gap-2">
+        <div class="mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" class="btn-ghost" @click="showForm = false">Cancel</button>
           <button type="submit" class="btn-primary" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
         </div>

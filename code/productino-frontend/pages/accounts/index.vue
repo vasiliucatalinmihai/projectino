@@ -109,13 +109,13 @@ async function confirmImpersonate() {
       <form class="flex flex-col gap-3" @submit.prevent="save">
         <label class="field">Name<input v-model="form.name" class="inp" required /></label>
         <label class="field">Slug<input v-model="form.slug" class="inp" placeholder="lowercase-dashes" /></label>
-        <label v-if="editing" class="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+        <label v-if="editing" class="flex cursor-pointer flex-wrap items-center gap-2 text-sm text-neutral-300">
           <input v-model="form.bringYourOwnAi" type="checkbox" class="accent-green-500" />
           Bring your own AI
           <span class="text-xs text-neutral-500">(use this account's own models)</span>
         </label>
         <p v-if="formError" class="m-0 text-sm text-red-400">{{ formError }}</p>
-        <div class="mt-1 flex justify-end gap-2">
+        <div class="mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" class="btn-ghost" @click="showForm = false">Cancel</button>
           <button type="submit" class="btn-primary" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
         </div>

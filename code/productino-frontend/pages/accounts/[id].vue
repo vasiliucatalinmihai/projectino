@@ -247,12 +247,12 @@ async function confirmImpersonate() {
     <p v-if="error || !account" class="mt-4 text-sm text-neutral-500">Account not found.</p>
 
     <template v-else>
-      <div class="mb-5 mt-2 flex items-start justify-between">
-        <div>
+      <div class="mb-5 mt-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0">
           <div class="kicker">// account</div>
-          <h1 class="m-0 text-2xl font-bold tracking-tight text-white">{{ account.name }}</h1>
+          <h1 class="m-0 break-words text-2xl font-bold tracking-tight text-white">{{ account.name }}</h1>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-col gap-2 sm:flex-row">
           <button class="btn-ghost" @click="openImpersonate">Impersonate</button>
           <button class="btn-primary" @click="openAccountEdit">Edit</button>
         </div>
@@ -302,13 +302,13 @@ async function confirmImpersonate() {
       <form class="flex flex-col gap-3" @submit.prevent="saveAccount">
         <label class="field">Name<input v-model="accountForm.name" class="inp" required /></label>
         <label class="field">Slug<input v-model="accountForm.slug" class="inp" placeholder="lowercase-dashes" /></label>
-        <label class="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+        <label class="flex cursor-pointer flex-wrap items-center gap-2 text-sm text-neutral-300">
           <input v-model="accountForm.bringYourOwnAi" type="checkbox" class="accent-green-500" />
           Bring your own AI
           <span class="text-xs text-neutral-500">(use this account's own models)</span>
         </label>
         <p v-if="accountError" class="m-0 text-sm text-red-400">{{ accountError }}</p>
-        <div class="mt-1 flex justify-end gap-2">
+        <div class="mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" class="btn-ghost" @click="showAccountForm = false">Cancel</button>
           <button type="submit" class="btn-primary" :disabled="savingAccount">{{ savingAccount ? 'Saving…' : 'Save' }}</button>
         </div>
@@ -323,7 +323,7 @@ async function confirmImpersonate() {
           <input v-model="userForm.email" type="email" class="inp disabled:bg-neutral-800 disabled:text-neutral-500" :disabled="!!editingUser" required />
         </label>
         <label class="field">Name<input v-model="userForm.name" class="inp" /></label>
-        <label v-if="editingUser" class="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+        <label v-if="editingUser" class="flex cursor-pointer flex-wrap items-center gap-2 text-sm text-neutral-300">
           <input v-model="userForm.active" type="checkbox" class="accent-green-500" />
           Active
           <span class="text-xs text-neutral-500">(inactive users cannot log in)</span>
@@ -353,7 +353,7 @@ async function confirmImpersonate() {
           Created <strong class="text-amber-300">inactive</strong> with a one-shot activation link — share it so the user can set their password.
         </p>
         <p v-if="userError" class="m-0 text-sm text-red-400">{{ userError }}</p>
-        <div class="mt-1 flex justify-end gap-2">
+        <div class="mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" class="btn-ghost" @click="showUserForm = false">Cancel</button>
           <button type="submit" class="btn-primary" :disabled="savingUser">{{ savingUser ? 'Saving…' : 'Save' }}</button>
         </div>

@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# productino docker manager — modeled on mind-guard's `mg`
-
 # text decorations
 RCol='\e[0m'
 Red='\e[0;31m';  BRed='\e[1;31m';

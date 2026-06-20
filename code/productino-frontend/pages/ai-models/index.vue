@@ -6,9 +6,9 @@
 
 <template>
   <div>
-    <div class="mb-4">
+    <div class="mb-4 min-w-0">
       <div class="kicker">// ai models</div>
-      <h1 class="m-0 text-2xl font-bold tracking-tight text-white">AI Models</h1>
+      <h1 class="m-0 break-words text-2xl font-bold tracking-tight text-white">AI Models</h1>
     </div>
 
     <AiModelsManager />

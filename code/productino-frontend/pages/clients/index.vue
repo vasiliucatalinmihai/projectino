@@ -109,7 +109,7 @@ async function remove(row: Client) {
         <label class="field">Address<input v-model="form.address" class="inp" /></label>
         <label class="field">Notes<textarea v-model="form.notes" rows="3" class="inp" /></label>
         <p v-if="formError" class="m-0 text-sm text-red-400">{{ formError }}</p>
-        <div class="mt-1 flex justify-end gap-2">
+        <div class="mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" class="btn-ghost" @click="showForm = false">Cancel</button>
           <button type="submit" class="btn-primary" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
         </div>

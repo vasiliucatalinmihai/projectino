@@ -59,13 +59,13 @@ function versionNo(versionId: number): string {
   <section v-if="prompt">
     <NuxtLink to="/prompts" class="text-sm text-neutral-500 hover:text-neutral-300">← Prompts</NuxtLink>
     <div class="kicker mt-2">// prompts / {{ prompt.key }}</div>
-    <h1 class="m-0 text-2xl font-bold tracking-tight text-white">{{ prompt.key }}</h1>
-    <p class="mb-6 mt-1 text-sm text-neutral-400">{{ prompt.description ?? '—' }}</p>
+    <h1 class="m-0 break-words text-2xl font-bold tracking-tight text-white">{{ prompt.key }}</h1>
+    <p class="mb-6 mt-1 break-words text-sm text-neutral-400">{{ prompt.description ?? '—' }}</p>
 
     <!-- Versions -->
     <h2 class="mb-2 text-sm font-semibold text-neutral-200">Versions</h2>
-    <div class="mb-8 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-      <table class="w-full border-collapse">
+    <div class="mb-8 overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-900">
+      <table class="w-full min-w-[760px] border-collapse">
         <thead>
           <tr class="font-mono text-[11px] uppercase tracking-wide text-neutral-500">
             <th class="border-b border-neutral-800 px-4 py-2.5 text-left">Version</th>
@@ -111,8 +111,8 @@ function versionNo(versionId: number): string {
 
     <!-- Recent runs -->
     <h2 class="mb-2 text-sm font-semibold text-neutral-200">Recent runs</h2>
-    <div class="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-      <table class="w-full border-collapse">
+    <div class="hidden overflow-x-auto rounded-xl border border-neutral-800 bg-neutral-900 sm:block">
+      <table class="w-full min-w-[880px] border-collapse">
         <thead>
           <tr class="font-mono text-[11px] uppercase tracking-wide text-neutral-500">
             <th class="border-b border-neutral-800 px-4 py-2.5 text-left">When</th>
@@ -149,6 +149,59 @@ function versionNo(versionId: number): string {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div class="grid gap-3 sm:hidden">
+      <div
+        v-if="!prompt.recentRuns.length"
+        class="rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-6 text-center text-sm text-neutral-500"
+      >
+        No runs recorded yet — they appear once an AI feature calls this prompt.
+      </div>
+
+      <article
+        v-for="r in prompt.recentRuns"
+        :key="r.id"
+        class="rounded-xl border border-neutral-800 bg-neutral-900 p-4"
+      >
+        <div class="flex min-w-0 items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="font-mono text-xs text-neutral-500">{{ fmtDate(r.createdAt) }}</div>
+            <div class="mt-1 break-words font-mono text-sm text-neutral-200">{{ r.model ?? '—' }}</div>
+          </div>
+          <span
+            class="shrink-0 font-mono text-sm"
+            :class="r.success === true ? 'text-brand' : r.success === false ? 'text-red-400' : 'text-neutral-600'"
+          >
+            {{ r.success === true ? 'OK' : r.success === false ? 'ERR' : '—' }}
+          </span>
+        </div>
+
+        <dl class="m-0 mt-4 grid grid-cols-2 gap-3 border-t border-neutral-800 pt-3">
+          <div>
+            <dt class="font-mono text-[10px] uppercase tracking-wide text-neutral-500">Version</dt>
+            <dd class="m-0 mt-0.5 font-mono text-sm text-neutral-200">{{ versionNo(r.versionId) }}</dd>
+          </div>
+          <div>
+            <dt class="font-mono text-[10px] uppercase tracking-wide text-neutral-500">Score</dt>
+            <dd class="m-0 mt-0.5 font-mono text-sm text-neutral-200">{{ dash(r.score) }}</dd>
+          </div>
+          <div>
+            <dt class="font-mono text-[10px] uppercase tracking-wide text-neutral-500">Latency</dt>
+            <dd class="m-0 mt-0.5 font-mono text-sm text-neutral-200">{{ dash(r.latencyMs, 'ms') }}</dd>
+          </div>
+          <div>
+            <dt class="font-mono text-[10px] uppercase tracking-wide text-neutral-500">Tokens</dt>
+            <dd class="m-0 mt-0.5 font-mono text-sm text-neutral-200">{{ dash(r.tokensIn) }} / {{ dash(r.tokensOut) }}</dd>
+          </div>
+          <div class="col-span-2 min-w-0">
+            <dt class="font-mono text-[10px] uppercase tracking-wide text-neutral-500">Subject</dt>
+            <dd class="m-0 mt-0.5 break-words text-sm text-neutral-200">
+              {{ r.subjectType ? `${r.subjectType}#${r.subjectId}` : '—' }}
+            </dd>
+          </div>
+        </dl>
+      </article>
     </div>
   </section>
 
