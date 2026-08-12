@@ -79,6 +79,7 @@ const SEVERITIES = ['high', 'medium', 'low'] as const;
 
 export const ExtractBeliefsSchema = z
   .object({
+    language: str,
     beliefs: arr(
       z
         .object({
@@ -102,6 +103,7 @@ export const ExtractBeliefsSchema = z
     ).catch([]),
   })
   .transform((o) => ({
+    language: o.language.trim() || 'English',
     beliefs: o.beliefs
       .filter((b) => b.name.trim().length > 0)
       .map((b) => ({
@@ -162,6 +164,11 @@ export type MapAnswersResult = z.infer<typeof MapAnswersSchema>;
 
 // -- synthesize-prd --------------------------------------------------------------
 
+const UiScreen = z
+  .object({ name: str, purpose: str, keyElements: stringList, primaryActions: stringList })
+  .loose();
+const UiFlow = z.object({ name: str, steps: stringList }).loose();
+
 export const SynthesizePrdSchema = z
   .object({
     summary: str,
@@ -189,6 +196,17 @@ export const SynthesizePrdSchema = z
           .filter((r) => r.description.trim().length > 0)
           .map((r) => ({ ...r, severity: r.severity.toLowerCase() as (typeof SEVERITIES)[number] })),
       ),
+    ui_spec: z
+      .preprocess(
+        (v) => (v && typeof v === 'object' ? v : { screens: [], userFlows: [] }),
+        z
+          .object({ screens: arr(UiScreen).catch([]), userFlows: arr(UiFlow).catch([]) })
+          .loose(),
+      )
+      .transform((s) => ({
+        screens: s.screens.filter((sc) => sc.name.trim().length > 0),
+        userFlows: s.userFlows.filter((f) => f.name.trim().length > 0),
+      })),
   })
   .refine((o) => o.summary.trim().length > 0, { message: 'summary is required' });
 export type SynthesizePrdResult = z.infer<typeof SynthesizePrdSchema>;
@@ -279,3 +297,38 @@ export const SynthesizeProposalSchema = z.object({
   phases: arr(z.object({ name: str, narrative: str }).loose()).catch([]),
 });
 export type SynthesizeProposalResult = z.infer<typeof SynthesizeProposalSchema>;
+
+// -- critic (generic actor→critic validation loop) -------------------------------
+
+export const CriticSchema = z.preprocess(
+  (v) => (typeof v === 'boolean' ? { pass: v, critique: '' } : v),
+  z
+    .object({
+      pass: z.preprocess((v) => v === true || toText(v).toLowerCase() === 'true', z.boolean()),
+      critique: str,
+    })
+    .loose(),
+);
+export type CriticResult = z.infer<typeof CriticSchema>;
+
+// -- design-architecture (Tech Lead persona) --------------------------------------
+
+const STACK_CHOICE = z.object({ choice: str, rationale: str }).loose();
+
+export const TechDesignSchema = z
+  .object({
+    frontend: STACK_CHOICE,
+    backend: STACK_CHOICE,
+    database: STACK_CHOICE,
+    apiStyle: STACK_CHOICE,
+    infra: STACK_CHOICE,
+    keyLibraries: arr(z.object({ name: str, purpose: str }).loose())
+      .catch([])
+      .transform((ls) => ls.filter((l) => l.name.trim().length > 0)),
+    risks: stringList,
+  })
+  .loose()
+  .refine((o) => o.backend.choice.trim().length > 0 && o.database.choice.trim().length > 0, {
+    message: 'backend and database choices are required',
+  });
+export type TechDesignResult = z.infer<typeof TechDesignSchema>;

@@ -34,8 +34,6 @@ export function createConcurrencyLimiter(maxConcurrent: number) {
 
 /**
  * Lock and run one at the time per key
- *
- * e.g. a double-clicked "Score" on one project shouldn't spawn two ProjectRounds
  */
 export class PerKeyLock {
   private readonly lastTaskByKey = new Map<string, Promise<unknown>>();

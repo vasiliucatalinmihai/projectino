@@ -134,7 +134,14 @@ export class ProjectController {
   ): Promise<ProjectResponse> {
     return ProjectResponse.fromEntity(
       await this.projectService.create(
-        { name: body.name, clientId: body.clientId, briefing: body.briefing },
+        {
+          name: body.name,
+          clientId: body.clientId,
+          projectType: body.projectType,
+          projectTypeOtherLabel: body.projectTypeOtherLabel,
+          language: body.language,
+          briefing: body.briefing,
+        },
         user,
       ),
     );
@@ -157,6 +164,9 @@ export class ProjectController {
         {
           name: body.name,
           clientId: body.clientId,
+          projectType: body.projectType,
+          projectTypeOtherLabel: body.projectTypeOtherLabel,
+          language: body.language,
           briefing: body.briefing,
           stage: body.stage,
         },

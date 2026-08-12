@@ -14,6 +14,7 @@ export class PromptRun extends BaseEntity {
   provider: string | null;
   model: string | null;
   score: number | null;
+  validationRounds: number | null;
   meta: Record<string, any> | null;
   createdAt: Date;
 

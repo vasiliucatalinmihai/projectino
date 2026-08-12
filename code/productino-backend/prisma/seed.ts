@@ -20,6 +20,7 @@ const SETTINGS = [
   { key: 'day_rate', value: '600', description: 'Blended day rate used to price proposals' },
   { key: 'llm_model', value: 'claude-opus-4-7', description: 'Default model for AI features' },
   { key: 'estimation_buffer_pct', value: '20', description: 'Buffer added to estimates, in percent' },
+  { key: 'max_validation_rounds', value: '3', description: 'Max actor→critic revision rounds per pipeline step' },
 ];
 
 const CLIENTS = [

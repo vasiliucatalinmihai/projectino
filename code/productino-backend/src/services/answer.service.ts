@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { BeliefStatus, QuestionStatus, SourceKind } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
+import { resolveLanguage } from '../common/project-type';
 import { Question, User } from '../entities';
 import { BeliefNodeRepository, QuestionRepository, SourceRepository } from '../repository';
 import { MapAnswersSchema, StructuredLlmService } from '../llm';
@@ -34,7 +35,7 @@ export class AnswerService {
     const openIds = new Set(openQuestions.map((question) => question.id));
     const mappedQandA = await this.llmService.run({
       promptKey: PromptKey.MAP_ANSWERS,
-      vars: { questions: this.questionsList(openQuestions), answers: replyText },
+      vars: { questions: this.questionsList(openQuestions), answers: replyText, language: resolveLanguage(project) },
       schema: MapAnswersSchema,
       accountId: user.accountId,
       subject: { type: 'project', id: project.id },
@@ -71,11 +72,7 @@ export class AnswerService {
     }
 
     // Record the new round's input as an ANSWERS source.
-    const nextRound =
-      (await this.sourceRepository.findAllForProject(projectId)).reduce(
-        (maxRound, source) => Math.max(maxRound, source.round),
-        0,
-      ) + 1;
+    const nextRound = await this.nextRound(projectId);
     const source = await this.sourceRepository.create({
       project: { connect: { id: projectId } },
       kind: SourceKind.ANSWERS,
@@ -101,6 +98,43 @@ export class AnswerService {
 
     // Re-score: a fresh ProjectRound captures the (now higher) rollup.
     await this.coverageService.run(projectId, user);
+  }
+
+  /**
+   * A manual round for information that didn't come through the Q&A loop
+   */
+  async processExtraInfo(
+    projectId: number,
+    user: User,
+    content: string,
+    kind: typeof SourceKind.TRANSCRIPT | typeof SourceKind.EMAIL = SourceKind.TRANSCRIPT,
+    label?: string,
+  ): Promise<void> {
+    await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
+    const text = (content ?? '').trim();
+    if (!text) throw new BadRequestException('No content provided');
+
+    const nextRound = await this.nextRound(projectId);
+    const kindLabel = kind === SourceKind.EMAIL ? 'Email' : 'Call/meeting notes';
+    const source = await this.sourceRepository.create({
+      project: { connect: { id: projectId } },
+      kind,
+      label: label?.trim() || `${kindLabel} — round ${nextRound}`,
+      content: text,
+      round: nextRound,
+    } as any);
+
+    await this.extractionService.run(projectId, user, source.id);
+    await this.coverageService.run(projectId, user);
+  }
+
+  private async nextRound(projectId: number): Promise<number> {
+    return (
+      (await this.sourceRepository.findAllForProject(projectId)).reduce(
+        (maxRound, source) => Math.max(maxRound, source.round),
+        0,
+      ) + 1
+    );
   }
 
   private questionsList(openQuestions: Question[]): string {

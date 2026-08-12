@@ -12,8 +12,25 @@ enum ProjectStage {
   GAP_ANALYSIS
   AWAITING_CLIENT
   DEFINITION
+  TECH_DESIGN
   PLANNING
   PROPOSAL
+}
+
+enum ProjectType {
+  WEB
+  MOBILE
+  CONSULTING_ERP
+  CONSULTING_BUSINESS_PROCESS
+  IOT
+  ERP_IMPLEMENTATION
+  FRONTEND_ONLY
+  OTHER
+}
+
+enum PipelineRole {
+  BUSINESS_ANALYST
+  TECH_LEAD
 }
 
 enum SourceKind {
@@ -176,6 +193,9 @@ model Project {
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   name         String
   stage        ProjectStage  @default(BRIEFING)
+  projectType  ProjectType   @default(WEB)
+  projectTypeOtherLabel String?
+  language     String?
   rubric       Json?
   sources       Source[]
   beliefNodes   BeliefNode[]
@@ -184,6 +204,7 @@ model Project {
   rounds        ProjectRound[]
   conflicts     Conflict[]
   definitions   ProductDefinition[]
+  techDesigns   TechDesign[]
   deliveryItems DeliveryItem[]
   proposals     Proposal[]
   createdAt    DateTime      @default(now())
@@ -237,6 +258,7 @@ model CoverageArea {
   key              String
   name             String
   weight           String         @default("medium") // high | medium | low
+  owner            PipelineRole   @default(BUSINESS_ANALYST)
   rollupConfidence Float          @default(0)
   status           CoverageStatus @default(UNDERDEFINED)
   round            Int            @default(1)
@@ -255,6 +277,7 @@ model Question {
   coverageKey   String?
   text          String         @db.Text
   assumedAnswer String?        @db.Text
+  askedBy       PipelineRole   @default(BUSINESS_ANALYST)
   impact        QuestionImpact @default(MEDIUM)
   status        QuestionStatus @default(OPEN)
   answerText    String?        @db.Text
@@ -351,6 +374,20 @@ model ProductDefinition {
   @@map("product_definitions")
 }
 
+model TechDesign {
+  id                     Int      @id @default(autoincrement())
+  projectId              Int
+  project                Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version                Int
+  content                Json
+  confidenceAtGeneration Float    @default(0)
+  createdAt              DateTime @default(now())
+
+  @@unique([projectId, version])
+  @@index([projectId])
+  @@map("tech_designs")
+}
+
 model Prompt {
   id              Int                @id @default(autoincrement())
   key             String             @unique
@@ -406,6 +443,7 @@ model PromptRun {
   provider     String?
   model        String?
   score        Float?
+  validationRounds Int?
   meta         Json?
   createdAt    DateTime @default(now())
 

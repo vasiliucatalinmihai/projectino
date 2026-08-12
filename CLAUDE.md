@@ -93,12 +93,13 @@ The PRD, client question doc, delivery plan and proposal each export to markdown
 
 ## The rubric (per-project)
 
-The rubric is the taxonomy of what a buildable project must define (functional scope, roles,
-data/migration, integrations, NFRs, compliance/GDPR, platforms, localization, operations,
-acceptance, constraints, stakeholders, success metrics, assumptions/out-of-scope). It lives in
-`RubricService` as a default catalog; each project may store `{ enabled, overrides }` in its
-`rubric` JSON column (null = full default). Scoring, extraction and the gate all run against the
-project's *effective* rubric.
+The rubric is the taxonomy of what a buildable project must define (functional scope, business
+rules, workflow states, roles, data/migration, integrations, admin/back-office needs, reporting,
+NFRs, compliance/GDPR, platforms, localization/content, UX/design/accessibility, operations,
+acceptance, constraints, stakeholders, success metrics, commercial/change-control boundaries,
+assumptions/out-of-scope). It lives in `RubricService` as a default catalog; each project may
+store `{ enabled, overrides }` in its `rubric` JSON column (null = full default). Scoring,
+extraction and the gate all run against the project's *effective* rubric.
 
 ## LLM architecture (provider-agnostic)
 
@@ -124,10 +125,138 @@ project's *effective* rubric.
 
 ## Roadmap
 
+- **Phase 2 — Agentic validation loop (critic-actor pattern).** See detailed plan below.
 - **Phase 5 — Cross-project KnowledgeBase.** Reusable patterns, estimates calibrated to this
   team's velocity, "questions that always end up mattering." Retrieval is introduced here.
 - **Phase 6 — Richer intake & export.** File/transcript/URL ingestion beyond paste;
   Jira/Linear/Notion export. (Change-impact traversal view is still a future nicety.)
+
+---
+
+## Phase 2 — Agentic validation loop
+
+Each pipeline step currently repairs only parse/schema errors (Zod). This phase adds a
+semantic validation layer: after a step produces valid JSON, a cheap critic call checks
+quality; if it fails, the actor reruns with the critique injected. Loop until pass or
+`maxRounds` exceeded.
+
+```
+  input
+    ↓
+  [actor LLM] ──→ Zod parse → semantic validator → pass? ──yes──→ output
+       ↑                                  │ no
+       └──────── critique + prev output ──┘   (up to maxRounds, default 3)
+```
+
+### Step 1 — Generic `runWithValidation` in `StructuredLlmService`
+
+Add a new method alongside the existing `run()`:
+
+```ts
+runWithValidation<T>(opts: {
+  prompt: string           // rendered prompt for the actor
+  schema: ZodSchema<T>
+  validate: (output: T) => { pass: boolean; critique: string }
+  maxRounds?: number       // default 3
+  criticPromptKey?: string // default 'critic' — the src/prompts/critic.md key
+}): Promise<{ output: T; rounds: number }>
+```
+
+On each failure round, rebuild the actor prompt with an appended block:
+
+```
+<previous_attempt>
+{{ JSON.stringify(prevOutput, null, 2) }}
+</previous_attempt>
+<critique>
+{{ critique }}
+</critique>
+Revise your output to address the critique. Return the same JSON schema.
+```
+
+Log each critic call as its own prompt run row (so token costs are visible). Add a
+`validationRounds` column to the prompt run log to surface which steps consistently need
+retries (a prompt-quality signal).
+
+### Step 2 — `src/prompts/critic.md`
+
+Generic critic prompt — takes `{step, criteria, input_summary, output_json}` and returns:
+
+```json
+{ "pass": boolean, "critique": string }
+```
+
+`criteria` is injected per-step (see Step 3). The critic must be concise and actionable —
+one sentence per failing criterion, no praise. Keep this prompt short and provider-neutral.
+
+### Step 3 — Per-step semantic validators
+
+Each validator is a pure function `(output: T) => { pass: boolean; critique: string }`.
+Implement as a static method on the relevant service or in a `validators/` file under `llm/`.
+
+**`extract-beliefs`**
+- Every `STATED` node has at least one non-empty entry in `sourceSpans`
+- No `INFERRED` node has `confidence > 0.7`
+- At least 3 belief nodes extracted total
+- No node has an empty `description`
+- No `ASSUMPTION` node has `confidence > 0.5`
+
+**`score-coverage`**
+- Every rubric area from the effective rubric appears in the output
+- Any area with `score < 0.4` has at least one question
+- Every question has a non-empty `assumedDefault`
+- No duplicate questions (same intent, different wording)
+
+**`map-answers`**
+- Every open question ID from the input is present in the output (answered or explicitly
+  flagged as unanswered with a reason)
+- Each mapped answer references a valid question ID
+
+**`detect-conflicts`**
+- Each conflict references exactly two belief IDs that exist in the current belief graph
+- No conflict has an empty `description`
+
+**`synthesize-prd`**
+- Out-of-scope section is non-empty
+- Risk register references at least one `RISK`-type belief ID
+- All `REQUIREMENT` beliefs with `confidence >= 0.7` are reflected somewhere in the PRD
+
+**`estimate-epic`**
+- Every task has `minDays > 0` and `maxDays >= minDays`
+- No task has identical min and max (forces ranged thinking)
+- Epic total `maxDays` ≤ 30 (flag outliers — likely a decomposition problem, not an
+  estimate problem)
+
+### Step 4 — Wire into pipeline services
+
+Replace bare `structuredLlm.run(...)` calls in each pipeline service with
+`structuredLlm.runWithValidation(...)`, passing the corresponding validator.
+
+Affected services (in execution order):
+1. `ExtractBeliefsService`
+2. `ScoreCoverageService`
+3. `MapAnswersService`
+4. `DetectConflictsService`
+5. `SynthesisPrdService`
+6. `GenerateEpicPlanService` (per-epic)
+7. `EstimateEpicService` (per-epic)
+
+`SynthesisProposalService` is deterministic prose + numbers — skip validation loop there.
+
+### Step 5 — Settings & observability
+
+- Add `maxValidationRounds` (default 3) to `Settings` so tenants can tune cost vs quality.
+- The prompt run log already tracks `tokensIn`/`tokensOut` — critic calls add rows with
+  `promptKey = 'critic'` so per-step cost is visible in the prompts admin page.
+- If a step exits the loop without passing, log a warning and persist the best attempt
+  (last output), flagging the run as `validationFailed: true`. Do not block the pipeline —
+  degrade gracefully.
+
+### Out of scope for Phase 2
+
+- Multi-agent parallelism (each step still runs sequentially in the pipeline)
+- Tool-use / function-calling for the critic (plain JSON is fine)
+- Storing per-round diffs in the DB (the final output is what matters)
 
 ## Current implementation
 

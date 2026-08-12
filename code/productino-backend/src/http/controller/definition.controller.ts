@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiBearerAuth,
-  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
@@ -9,12 +9,13 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { DefinitionService, PipelineLockService } from '../../services';
+import { DefinitionService, PipelineQueueService, ProjectService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { User } from '../../entities';
 import { CurrentUser, RequirePermissions } from '../decorators';
 import { GenerateDefinitionRequest } from '../request/project';
 import { ProductDefinitionResponse } from '../response/definition';
+import { EnqueuedJobResponse } from '../response/pipeline-job';
 
 @ApiTags('Product Definition')
 @ApiBearerAuth('bearer')
@@ -24,7 +25,8 @@ import { ProductDefinitionResponse } from '../response/definition';
 export class DefinitionController {
   constructor(
     private readonly definitions: DefinitionService,
-    private readonly lock: PipelineLockService,
+    private readonly projectService: ProjectService,
+    private readonly pipelineQueue: PipelineQueueService,
   ) {}
 
   @Get()
@@ -48,22 +50,23 @@ export class DefinitionController {
   @ApiOperation({
     summary: 'Generate a product definition (PRD) from the belief graph',
     description:
-      'Requires RUN_LLM. Gated on the latest rollup; below the gate, pass ' +
-      '`override: true` (with a reason) to proceed. Returns a new version.',
+      'Requires RUN_LLM. Enqueues generation, gated on the latest rollup; below the gate the job ' +
+      'fails with a structured `{ gate: true, rollupConfidence, threshold }` error — pass ' +
+      '`override: true` (with a reason) to proceed anyway. Poll `GET .../jobs/:jobId`.',
   })
   @ApiParam({ name: 'projectId', type: Number })
-  @ApiCreatedResponse({ type: ProductDefinitionResponse })
+  @ApiAcceptedResponse({ type: EnqueuedJobResponse })
   async generate(
     @Param('projectId', ParseIntPipe) projectId: number,
     @Body() body: GenerateDefinitionRequest,
     @CurrentUser() user: User,
-  ): Promise<ProductDefinitionResponse> {
-    const definition = await this.lock.run(projectId, () =>
-      this.definitions.generate(projectId, user, {
+  ): Promise<EnqueuedJobResponse> {
+    await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
+    return new EnqueuedJobResponse(
+      await this.pipelineQueue.enqueue(projectId, user, 'definition', {
         override: body.override,
         overrideReason: body.overrideReason,
       }),
     );
-    return ProductDefinitionResponse.fromEntity(definition);
   }
 }

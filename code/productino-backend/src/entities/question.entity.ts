@@ -1,4 +1,4 @@
-import { QuestionImpact, QuestionStatus } from '@prisma/client';
+import { PipelineRole, QuestionImpact, QuestionStatus } from '@prisma/client';
 import { BaseEntity } from './base.entity';
 
 export class Question extends BaseEntity {
@@ -7,6 +7,7 @@ export class Question extends BaseEntity {
   coverageKey: string | null;
   text: string;
   assumedAnswer: string | null;
+  askedBy: PipelineRole;
   impact: QuestionImpact;
   status: QuestionStatus;
   answerText: string | null;

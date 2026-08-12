@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConflictStatus } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
+import { resolveLanguage } from '../common/project-type';
 import { BeliefNode, Conflict, User } from '../entities';
 import { BeliefNodeRepository, ConflictRepository, ProjectRoundRepository } from '../repository';
 import { DetectConflictsSchema, StructuredLlmService } from '../llm';
@@ -28,7 +29,7 @@ export class ConflictService {
     const nodeNames = nodes.map((node) => node.name);
     const { conflicts } = await this.llmService.run({
       promptKey: PromptKey.DETECT_CONFLICTS,
-      vars: { beliefsList: this.beliefsList(nodes) },
+      vars: { beliefsList: this.beliefsList(nodes), language: resolveLanguage(project) },
       schema: DetectConflictsSchema,
       accountId: user.accountId,
       subject: { type: 'project', id: project.id },

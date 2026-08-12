@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProjectStage } from '@prisma/client';
+import { ProjectStage, ProjectType } from '@prisma/client';
 import { Project } from '../../../entities';
 
 export class ProjectResponse {
@@ -35,6 +35,19 @@ export class ProjectResponse {
   @ApiProperty({ enum: ProjectStage, example: ProjectStage.BRIEFING })
   stage: ProjectStage;
 
+  @ApiProperty({ enum: ProjectType, example: ProjectType.WEB })
+  projectType: ProjectType;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Free-text label when projectType is OTHER' })
+  projectTypeOtherLabel: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'Romanian',
+    description: 'Output language every LLM call responds in — auto-detected from the briefing, or overridden',
+  })
+  language: string | null;
+
   @ApiProperty()
   createdAt: Date;
 
@@ -56,6 +69,9 @@ export class ProjectResponse {
       clientName: project.client?.name ?? null,
       briefing: project.briefing ?? null,
       stage: project.stage,
+      projectType: project.projectType,
+      projectTypeOtherLabel: project.projectTypeOtherLabel ?? null,
+      language: project.language ?? null,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
     });

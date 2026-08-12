@@ -1,6 +1,8 @@
 import { BadGatewayException, Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
 import type { ZodType } from 'zod';
+import { PipelineRole } from '@prisma/client';
 import { PromptManagerService } from '../services/prompt-manager.service';
+import { SettingService } from '../services/setting.service';
 import { AiModelRepository } from '../repository';
 import { LlmService } from './llm.service';
 import { LlmConfigResolverService } from './llm-config-resolver.service';
@@ -14,6 +16,9 @@ import {
 import { extractJson } from './json-extract';
 import { capabilitiesFor } from './provider-capabilities';
 import { jsonSchemaFor } from './schemas/json-schemas';
+import { CriticSchema } from './schemas/pipeline-schemas';
+import { PromptKey } from '../common/prompt-key';
+import { PIPELINE_ROLE_DESCRIPTION, PIPELINE_ROLE_LABEL } from '../common/pipeline-role';
 
 /** Untrusted-input hygiene + a hard nudge toward clean JSON, on every structured call. */
 const SYSTEM_PREAMBLE =
@@ -48,6 +53,33 @@ export interface StructuredRunOptions<T> {
    * references against the graph) and feed failures into the repair loop.
    */
   validate?: (value: T) => SemanticVerdict;
+  /** Extra text appended to the rendered prompt content — used by runWithValidation's repair loop. */
+  appendToPrompt?: string;
+  /** Which actor→critic round this call belongs to (1 = first attempt); logged on the PromptRun row. */
+  validationRound?: number;
+}
+
+/** Criteria fed to the generic LLM critic (src/prompts/critic.md) for qualitative review. */
+export interface LlmCriticOptions {
+  step: string;
+  criteria: string;
+  inputSummary: string;
+  /** Persona the critic reviews from — e.g. Tech Design output critiqued as the Business Analyst. */
+  role?: PipelineRole;
+}
+
+export interface RunWithValidationOptions<T> extends StructuredRunOptions<T> {
+  /** Cheap, deterministic per-step check — no LLM call. Runs first, every round. */
+  semanticValidate: (value: T) => { pass: boolean; critique: string };
+  /** Optional qualitative LLM critic pass, run only once the deterministic check passes. */
+  llmCritic?: LlmCriticOptions;
+  maxRounds?: number;
+}
+
+export interface ValidatedRunResult<T> {
+  output: T;
+  rounds: number;
+  validationFailed: boolean;
 }
 
 /**
@@ -66,6 +98,7 @@ export class StructuredLlmService {
     private readonly llmService: LlmService,
     private readonly llmConfigResolver: LlmConfigResolverService,
     private readonly aiModelRepository: AiModelRepository,
+    private readonly settingService: SettingService,
   ) {}
 
   async run<T>(runOptions: StructuredRunOptions<T>): Promise<T> {
@@ -84,8 +117,11 @@ export class StructuredLlmService {
     // anthopic gets strict tool-use with an input schema; everyone else uses native JSON mode (driven by `json: true` in each adapter).
     const responseSchema = caps.structuredOutput === 'tool' ? jsonSchemaFor(runOptions.promptKey) : undefined;
 
+    const promptContent = runOptions.appendToPrompt
+      ? `${renderedPrompt.content}\n\n${runOptions.appendToPrompt}`
+      : renderedPrompt.content;
     const startedTime = Date.now();
-    let messages: LlmMessage[] = [{ role: 'user', content: renderedPrompt.content }];
+    let messages: LlmMessage[] = [{ role: 'user', content: promptContent }];
     let lastError = 'no response';
     let lastLlmResult: LlmResult | null = null;
 
@@ -134,6 +170,7 @@ export class StructuredLlmService {
                 provider: result.provider,
                 model: result.model,
                 score: runOptions.scoreOf ? runOptions.scoreOf(parsed.data) : undefined,
+                validationRounds: runOptions.validationRound,
                 meta: {
                   attempts: attempt,
                   finishReason: result.finishReason ?? null,
@@ -168,7 +205,7 @@ export class StructuredLlmService {
       // Set up the next (repair) attempt.
       if (attempt < MAX_ATTEMPTS && repairText) {
         messages = [
-          { role: 'user', content: renderedPrompt.content },
+          { role: 'user', content: promptContent },
           { role: 'assistant', content: result.text.slice(0, 6000) },
           { role: 'user', content: repairText },
         ];
@@ -188,6 +225,74 @@ export class StructuredLlmService {
       `Model did not return valid "${runOptions.promptKey}" output after ${MAX_ATTEMPTS} attempts` +
         (this.isTruncated(lastLlmResult?.finishReason) ? ' (response was truncated — raise maxTokens)' : ''),
     );
+  }
+
+  /**
+   * Actor→critic validation loop (Phase 2). Runs the actor via `run()` (which already
+   * owns schema-level repair), then a cheap deterministic check and — only once that
+   * passes — an optional qualitative LLM critic pass. On failure, feeds the prior
+   * output + critique back to the actor as extra prompt context and retries, up to
+   * `maxRounds`. Degrades gracefully: the pipeline never blocks on this loop, it just
+   * returns the best attempt with `validationFailed: true`.
+   */
+  async runWithValidation<T>(runOptions: RunWithValidationOptions<T>): Promise<ValidatedRunResult<T>> {
+    const maxRounds = runOptions.maxRounds ?? (await this.resolveMaxRounds(runOptions.accountId));
+    let appendToPrompt = runOptions.appendToPrompt;
+
+    for (let round = 1; round <= maxRounds; round++) {
+      const output = await this.run({ ...runOptions, appendToPrompt, validationRound: round });
+
+      const deterministic = runOptions.semanticValidate(output);
+      const verdict =
+        deterministic.pass && runOptions.llmCritic
+          ? await this.runLlmCritic(runOptions, output)
+          : deterministic;
+
+      if (verdict.pass) {
+        return { output, rounds: round, validationFailed: false };
+      }
+      if (round >= maxRounds) {
+        this.logger.warn(
+          `"${runOptions.promptKey}" did not pass validation after ${round} round(s): ${verdict.critique.slice(0, 300)}`,
+        );
+        return { output, rounds: round, validationFailed: true };
+      }
+
+      appendToPrompt =
+        `<previous_attempt>\n${JSON.stringify(output, null, 2).slice(0, 4000)}\n</previous_attempt>\n` +
+        `<critique>\n${verdict.critique}\n</critique>\n` +
+        'Revise your output to address the critique. Return the same JSON schema, complete — no prose, no code fences.';
+    }
+    /* istanbul ignore next — loop always returns by maxRounds */
+    throw new Error('runWithValidation: unreachable');
+  }
+
+  private async runLlmCritic<T>(
+    runOptions: RunWithValidationOptions<T>,
+    output: T,
+  ): Promise<{ pass: boolean; critique: string }> {
+    const critic = runOptions.llmCritic!;
+    const result = await this.run({
+      promptKey: PromptKey.CRITIC,
+      vars: {
+        step: critic.step,
+        criteria: critic.criteria,
+        input_summary: critic.inputSummary,
+        output_json: JSON.stringify(output, null, 2).slice(0, 6000),
+        role: critic.role ? PIPELINE_ROLE_LABEL[critic.role] : undefined,
+        roleDescription: critic.role ? PIPELINE_ROLE_DESCRIPTION[critic.role] : undefined,
+      },
+      schema: CriticSchema,
+      accountId: runOptions.accountId,
+      subject: runOptions.subject,
+    });
+    return { pass: result.pass, critique: result.critique || 'Output did not meet the stated criteria.' };
+  }
+
+  private async resolveMaxRounds(accountId: number): Promise<number> {
+    const raw = await this.settingService.getValue(accountId, 'max_validation_rounds').catch(() => null);
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 3;
   }
 
   // === dumb helpers ===

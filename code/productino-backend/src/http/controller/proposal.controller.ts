@@ -1,7 +1,7 @@
 import { Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiBearerAuth,
-  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
@@ -9,11 +9,12 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { PipelineLockService, ProposalService } from '../../services';
+import { PipelineQueueService, ProjectService, ProposalService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { User } from '../../entities';
 import { CurrentUser, RequirePermissions } from '../decorators';
 import { ProposalResponse, ProposalDocResponse } from '../response/proposal';
+import { EnqueuedJobResponse } from '../response/pipeline-job';
 
 @ApiTags('Proposal')
 @ApiBearerAuth('bearer')
@@ -23,7 +24,8 @@ import { ProposalResponse, ProposalDocResponse } from '../response/proposal';
 export class ProposalController {
   constructor(
     private readonly proposals: ProposalService,
-    private readonly lock: PipelineLockService,
+    private readonly projectService: ProjectService,
+    private readonly pipelineQueue: PipelineQueueService,
   ) {}
 
   @Get()
@@ -55,16 +57,17 @@ export class ProposalController {
   @RequirePermissions(PermissionKey.RUN_LLM)
   @ApiOperation({
     summary: 'Generate a priced proposal from the delivery plan',
-    description: 'Requires RUN_LLM. Prices the plan (day-rate + buffer) and writes the prose. New version.',
+    description:
+      'Requires RUN_LLM. Enqueues pricing the plan (day-rate + buffer) and writing the prose ' +
+      '(a new version). Poll `GET .../jobs/:jobId`.',
   })
   @ApiParam({ name: 'projectId', type: Number })
-  @ApiCreatedResponse({ type: ProposalResponse })
+  @ApiAcceptedResponse({ type: EnqueuedJobResponse })
   async generate(
     @Param('projectId', ParseIntPipe) projectId: number,
     @CurrentUser() user: User,
-  ): Promise<ProposalResponse> {
-    return ProposalResponse.fromEntity(
-      await this.lock.run(projectId, () => this.proposals.generate(projectId, user)),
-    );
+  ): Promise<EnqueuedJobResponse> {
+    await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
+    return new EnqueuedJobResponse(await this.pipelineQueue.enqueue(projectId, user, 'proposal'));
   }
 }

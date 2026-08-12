@@ -1,15 +1,13 @@
 import { BadRequestException, Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { DeliveryLevel, ProjectStage } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
+import { requiresTechDesign, resolveLanguage } from '../common/project-type';
 import { DeliveryItem, User } from '../entities';
-import {
-  DeliveryItemRepository,
-  ProductDefinitionRepository,
-  ProjectRepository,
-} from '../repository';
+import { DeliveryItemRepository, ProductDefinitionRepository, TechDesignRepository } from '../repository';
 import {
   EstimateEpicResult,
   EstimateEpicSchema,
+  estimateEpicValidator,
   GenerateEpicPlanResult,
   GenerateEpicPlanSchema,
   GenerateEpicsResult,
@@ -18,7 +16,7 @@ import {
 } from '../llm';
 import { createConcurrencyLimiter } from '../common/concurrency';
 import { ProjectService } from './project.service';
-import { PipelineResetService } from './pipeline-reset.service';
+import { PipelineOrchestratorService } from './pipeline-orchestrator.service';
 
 const MAX_TASK_DAYS = 60;
 
@@ -45,6 +43,9 @@ interface PrdContext {
   inScope: string;
   userStories: string;
   nonFunctional: string;
+  uiSpec: string;
+  techStack: string;
+  language: string;
 }
 
 /**
@@ -54,11 +55,11 @@ interface PrdContext {
 export class DeliveryService {
   constructor(
     private readonly projectService: ProjectService,
-    private readonly projectRepo: ProjectRepository,
     private readonly deliveryItemRepository: DeliveryItemRepository,
     private readonly productDefinitionRepository: ProductDefinitionRepository,
+    private readonly techDesignRepository: TechDesignRepository,
     private readonly llmService: StructuredLlmService,
-    private readonly resetService: PipelineResetService,
+    private readonly orchestrator: PipelineOrchestratorService,
   ) {}
 
   async tree(projectId: number, user: User): Promise<DeliveryTree> {
@@ -104,18 +105,36 @@ export class DeliveryService {
     if (!definition) {
       throw new BadRequestException('Generate a product definition before planning delivery');
     }
+    let techStack = '(consulting engagement — no software architecture)';
+    if (requiresTechDesign(project.projectType)) {
+      const techDesign = await this.techDesignRepository.findLatestForProject(projectId);
+      if (!techDesign) {
+        throw new BadRequestException('Generate the Tech Lead architecture before planning delivery');
+      }
+      techStack = this.techStackList((techDesign.content ?? {}) as Record<string, any>);
+    }
     const content = (definition.content ?? {}) as Record<string, any>;
     const prdContext: PrdContext = {
       summary: this.toText(content.summary),
       inScope: this.toBulletList(content.in_scope),
       userStories: this.toStoryBulletList(content.user_stories),
       nonFunctional: this.toBulletList(content.non_functional),
+      uiSpec: this.uiSpecList(content.ui_spec),
+      techStack,
+      language: resolveLanguage(project),
     };
 
     // Epics (flat — one call).
     const { epics } = await this.llmService.run({
       promptKey: PromptKey.GENERATE_EPICS,
-      vars: { summary: prdContext.summary, inScope: prdContext.inScope, userStories: prdContext.userStories },
+      vars: {
+        summary: prdContext.summary,
+        inScope: prdContext.inScope,
+        userStories: prdContext.userStories,
+        uiSpec: prdContext.uiSpec,
+        techStack: prdContext.techStack,
+        language: prdContext.language,
+      },
       schema: GenerateEpicsSchema,
       accountId: user.accountId,
       subject: { type: 'project', id: project.id },
@@ -148,9 +167,8 @@ export class DeliveryService {
       ),
     );
 
-    // Move into PLANNING. Regenerating the plan clears any proposal below
-    await this.projectRepo.update(project.id, { stage: ProjectStage.PLANNING } as any);
-    await this.resetService.afterDelivery(project.id);
+    // Move into PLANNING. Regenerating the plan clears any proposal below.
+    await this.orchestrator.advance(project.id, ProjectStage.PLANNING, 'delivery');
 
     return this.buildTree(await this.deliveryItemRepository.findAllForProject(projectId));
   }
@@ -171,6 +189,9 @@ export class DeliveryService {
       vars: {
         summary: prd.summary,
         nonFunctional: prd.nonFunctional,
+        uiSpec: prd.uiSpec,
+        techStack: prd.techStack,
+        language: prd.language,
         epicTitle: epic.title,
         epicDescription: epic.description,
       },
@@ -238,11 +259,12 @@ export class DeliveryService {
       .join('\n');
 
     try {
-      const { estimates } = await this.llmService.run({
+      const { output } = await this.llmService.runWithValidation({
         promptKey: PromptKey.ESTIMATE_EPIC,
         vars: {
           summary: prd.summary,
           nonFunctional: prd.nonFunctional,
+          techStack: prd.techStack,
           epicTitle: epic.title,
           epicDescription: epic.description,
           tasks: taskList,
@@ -251,8 +273,9 @@ export class DeliveryService {
         accountId,
         subject: { type: 'project', id: projectId },
         scoreOf: (value: EstimateEpicResult) => value.estimates.length,
+        semanticValidate: estimateEpicValidator,
       });
-      return new Map(estimates.map((estimate) => [estimate.index, estimate]));
+      return new Map(output.estimates.map((estimate) => [estimate.index, estimate]));
     } catch {
       return new Map();
     }
@@ -321,6 +344,30 @@ export class DeliveryService {
   private toBulletList(value: any): string {
     const items = Array.isArray(value) ? value : value ? [value] : [];
     return items.map((item) => `- ${this.toText(item)}`).join('\n') || '(none)';
+  }
+
+  private uiSpecList(value: any): string {
+    const screens = Array.isArray(value?.screens) ? value.screens : [];
+    if (!screens.length) return '(no UI spec captured)';
+    return screens
+      .map((screen: any) => `- ${this.toText(screen?.name)}: ${this.toText(screen?.purpose)}`)
+      .join('\n');
+  }
+
+  private techStackList(content: Record<string, any>): string {
+    const fields: Array<[string, string]> = [
+      ['Frontend', this.toText(content.frontend?.choice)],
+      ['Backend', this.toText(content.backend?.choice)],
+      ['Database', this.toText(content.database?.choice)],
+      ['API style', this.toText(content.apiStyle?.choice)],
+      ['Infra', this.toText(content.infra?.choice)],
+    ];
+    const lines = fields.filter(([, choice]) => choice).map(([label, choice]) => `- ${label}: ${choice}`);
+    const libs = Array.isArray(content.keyLibraries) ? content.keyLibraries : [];
+    if (libs.length) {
+      lines.push(`- Key libraries: ${libs.map((l: any) => this.toText(l?.name)).filter(Boolean).join(', ')}`);
+    }
+    return lines.join('\n') || '(no architecture recorded)';
   }
 
   private toStoryBulletList(value: any): string {

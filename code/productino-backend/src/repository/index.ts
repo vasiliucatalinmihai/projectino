@@ -17,5 +17,6 @@ export * from './question.repository';
 export * from './project-round.repository';
 export * from './conflict.repository';
 export * from './product-definition.repository';
+export * from './tech-design.repository';
 export * from './delivery-item.repository';
 export * from './proposal.repository';

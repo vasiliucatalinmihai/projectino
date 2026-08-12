@@ -96,7 +96,7 @@ const edge = [
 
 const stats = [
   { value: '1', unit: 'briefing in', label: 'transcripts, docs, emails' },
-  { value: '14', unit: 'rubric areas', label: 'scored for completeness' },
+  { value: '19', unit: 'rubric areas', label: 'scored for completeness' },
   { value: '1', unit: 'source of truth', label: 'PRD · tasks · proposal' },
   { value: '∞', unit: 'rounds', label: 'until you’re confident' },
 ];

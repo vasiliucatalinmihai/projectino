@@ -63,6 +63,7 @@ export class PromptManagerService implements OnModuleInit {
       provider: outcome.provider ?? null,
       model: outcome.model ?? null,
       score: outcome.score ?? null,
+      validationRounds: outcome.validationRounds ?? null,
       subjectType: promptRunContext.subjectType ?? null,
       subjectId: promptRunContext.subjectId ?? null,
       meta: outcome.meta ?? undefined,

@@ -17,5 +17,6 @@ export * from './question.entity';
 export * from './project-round.entity';
 export * from './conflict.entity';
 export * from './product-definition.entity';
+export * from './tech-design.entity';
 export * from './delivery-item.entity';
 export * from './proposal.entity';

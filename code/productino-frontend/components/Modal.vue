@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const props = withDefaults(
-  defineProps<{ title: string; size?: 'md' | 'lg' | 'xl' | '2xl' | '3xl' }>(),
+  defineProps<{ title: string; size?: 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' }>(),
   { size: 'md' },
 );
 const emit = defineEmits<{ close: [] }>();
@@ -13,6 +13,8 @@ const widthClass = computed(
       xl: 'max-w-xl',
       '2xl': 'max-w-2xl',
       '3xl': 'max-w-3xl',
+      '4xl': 'max-w-4xl',
+      '5xl': 'max-w-5xl',
     })[props.size],
 );
 </script>

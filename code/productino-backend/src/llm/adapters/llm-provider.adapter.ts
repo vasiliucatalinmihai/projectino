@@ -12,7 +12,7 @@ export interface LlmProviderAdapter {
   generate(config: ResolvedLlmConfig, req: LlmRequest): Promise<AdapterResult>;
 }
 
-const TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 60_000;
+const TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 180_000;
 const MAX_RETRIES = Number(process.env.LLM_MAX_RETRIES ?? 2);
 
 /** Shared HTTP for fetch-based adapters: timeout + retry. */

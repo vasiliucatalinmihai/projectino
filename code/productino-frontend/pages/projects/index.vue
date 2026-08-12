@@ -6,11 +6,23 @@ interface Project {
   clientName: string | null;
   accountName: string | null;
   stage: string;
+  projectType: string;
 }
 interface ClientOption {
   id: number;
   name: string;
 }
+
+const PROJECT_TYPES: Array<{ value: string; label: string }> = [
+  { value: 'WEB', label: 'Web' },
+  { value: 'MOBILE', label: 'Mobile' },
+  { value: 'CONSULTING_ERP', label: 'ERP consulting' },
+  { value: 'CONSULTING_BUSINESS_PROCESS', label: 'Business process consulting' },
+  { value: 'IOT', label: 'IoT' },
+  { value: 'ERP_IMPLEMENTATION', label: 'ERP implementation' },
+  { value: 'FRONTEND_ONLY', label: 'Frontend-only app' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 const { user } = useAuth();
 const isSuperAdmin = computed(() => !!user.value?.isSuperAdmin);
@@ -34,16 +46,27 @@ const columns = computed(() => [
   { key: 'name', label: 'Name' },
   ...(isSuperAdmin.value ? [{ key: 'accountName', label: 'Account' }] : []),
   { key: 'clientName', label: 'Client' },
+  { key: 'typeLabel', label: 'Type' },
   { key: 'stage', label: 'Stage' },
 ]);
+const TYPE_LABEL = Object.fromEntries(PROJECT_TYPES.map((t) => [t.value, t.label]));
+const rows = computed(() =>
+  (projects.value ?? []).map((p) => ({ ...p, typeLabel: TYPE_LABEL[p.projectType] ?? p.projectType })),
+);
 
 const showForm = ref(false);
 const saving = ref(false);
 const formError = ref('');
-const form = reactive({ name: '', clientId: undefined as number | undefined, briefing: '' });
+const form = reactive({
+  name: '',
+  clientId: undefined as number | undefined,
+  projectType: 'WEB',
+  projectTypeOtherLabel: '',
+  briefing: '',
+});
 
 function openCreate() {
-  Object.assign(form, { name: '', clientId: clients.value?.[0]?.id, briefing: '' });
+  Object.assign(form, { name: '', clientId: clients.value?.[0]?.id, projectType: 'WEB', projectTypeOtherLabel: '', briefing: '' });
   formError.value = '';
   showForm.value = true;
 }
@@ -53,7 +76,13 @@ async function save() {
   try {
     await useApi('/projects', {
       method: 'POST',
-      body: { name: form.name, clientId: form.clientId, briefing: form.briefing || undefined },
+      body: {
+        name: form.name,
+        clientId: form.clientId,
+        projectType: form.projectType,
+        projectTypeOtherLabel: form.projectType === 'OTHER' ? form.projectTypeOtherLabel || undefined : undefined,
+        briefing: form.briefing || undefined,
+      },
     });
     showForm.value = false;
     await refresh();
@@ -71,7 +100,7 @@ async function save() {
       title="Projects"
       :creatable="canCreate"
       :columns="columns"
-      :rows="projects ?? []"
+      :rows="rows"
       empty-text="No projects yet."
       @create="openCreate"
       @view="navigateTo(`/projects/${$event.id}`)"
@@ -88,6 +117,16 @@ async function save() {
           <NuxtLink v-if="!hasClients" to="/clients" class="mt-1 text-xs text-brand">
             No clients yet — create one first →
           </NuxtLink>
+        </label>
+        <label class="field">
+          Project type
+          <select v-model="form.projectType" class="inp">
+            <option v-for="t in PROJECT_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+          </select>
+        </label>
+        <label v-if="form.projectType === 'OTHER'" class="field">
+          Project type (describe)
+          <input v-model="form.projectTypeOtherLabel" class="inp" maxlength="120" />
         </label>
         <label class="field">Briefing<textarea v-model="form.briefing" rows="4" class="inp" /></label>
         <p v-if="formError" class="m-0 text-sm text-red-400">{{ formError }}</p>

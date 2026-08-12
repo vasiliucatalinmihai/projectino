@@ -2,6 +2,14 @@
 import type { AuthUser } from '~/composables/useAuth';
 
 const { token, user, logout, isImpersonating, stopImpersonating } = useAuth();
+// Bull Board lives on the backend itself (not a Nuxt page), gated to super admins there too —
+// this just gets the admin to it with their current session, opened in a new tab. Deliberately
+// NOT useApiBase() — that branches to the internal docker-network URL during SSR, which is right
+// for server-side data fetching but wrong here: this is a link a human clicks in their own
+// browser, so it must always resolve to the public-facing API base, in every render pass.
+const bullBoardUrl = computed(
+  () => `${useRuntimeConfig().public.apiBase}/bull-board?token=${encodeURIComponent(token.value ?? '')}`,
+);
 const { dialog, onConfirm, onClose, confirm, alert } = useConfirm();
 
 interface ResetMyPasswordResponse { activationToken: string }
@@ -238,6 +246,20 @@ const bottomNav = computed(() =>
         <!-- Settings-like items pinned to the bottom -->
         <nav class="mt-auto flex flex-col gap-1 border-t border-neutral-800 pt-3">
           <NavLink v-for="item in bottomNav" :key="item.to" :item="item" :collapsed="navCollapsed" />
+          <a
+            v-if="isSuperAdmin"
+            :href="bullBoardUrl"
+            target="_blank"
+            rel="noopener"
+            :title="navCollapsed ? 'Bull Board (job queue)' : undefined"
+            class="flex items-center rounded-md px-3 py-2 text-sm font-medium text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+            :class="navCollapsed ? 'justify-center' : 'gap-3'"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-5 w-5 shrink-0">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
+            </svg>
+            <span v-if="!navCollapsed">Bull Board ↗</span>
+          </a>
         </nav>
       </aside>
 

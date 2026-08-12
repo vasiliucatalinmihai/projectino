@@ -1,7 +1,7 @@
 import { Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiBearerAuth,
-  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
@@ -9,11 +9,12 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { DeliveryService, PipelineLockService } from '../../services';
+import { DeliveryService, PipelineQueueService, ProjectService } from '../../services';
 import { PermissionKey } from '../../common/permission-key';
 import { User } from '../../entities';
 import { CurrentUser, RequirePermissions } from '../decorators';
 import { DeliveryDocResponse, DeliveryResponse } from '../response/delivery';
+import { EnqueuedJobResponse } from '../response/pipeline-job';
 
 @ApiTags('Delivery')
 @ApiBearerAuth('bearer')
@@ -23,7 +24,8 @@ import { DeliveryDocResponse, DeliveryResponse } from '../response/delivery';
 export class DeliveryController {
   constructor(
     private readonly delivery: DeliveryService,
-    private readonly lock: PipelineLockService,
+    private readonly projectService: ProjectService,
+    private readonly pipelineQueue: PipelineQueueService,
   ) {}
 
   @Get()
@@ -60,16 +62,17 @@ export class DeliveryController {
   @RequirePermissions(PermissionKey.RUN_LLM)
   @ApiOperation({
     summary: 'Generate the delivery plan from the PRD',
-    description: 'Requires RUN_LLM. Decomposes the latest PRD into epics/stories/estimated tasks (replaces the plan).',
+    description:
+      'Requires RUN_LLM. Enqueues decomposing the latest PRD into epics/stories/estimated tasks ' +
+      '(replaces the plan). Poll `GET .../jobs/:jobId`.',
   })
   @ApiParam({ name: 'projectId', type: Number })
-  @ApiCreatedResponse({ type: DeliveryResponse })
+  @ApiAcceptedResponse({ type: EnqueuedJobResponse })
   async generate(
     @Param('projectId', ParseIntPipe) projectId: number,
     @CurrentUser() user: User,
-  ): Promise<DeliveryResponse> {
-    return new DeliveryResponse(
-      await this.lock.run(projectId, () => this.delivery.generate(projectId, user)),
-    );
+  ): Promise<EnqueuedJobResponse> {
+    await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
+    return new EnqueuedJobResponse(await this.pipelineQueue.enqueue(projectId, user, 'delivery'));
   }
 }

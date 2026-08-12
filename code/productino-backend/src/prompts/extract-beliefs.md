@@ -12,6 +12,25 @@ below and extract a structured list of **belief nodes** — discrete things we n
 the software project. This is the foundation of a scope/cost decision, so be precise about how
 sure each belief is and where it came from.
 
+PROJECT TYPE: {{projectType}}
+Read every belief through the lens of this project type — e.g. an ERP engagement should surface
+module boundaries and business-process handoffs; a mobile app should surface target platforms;
+a consulting engagement should surface deliverables and decision points, not just software features.
+
+LANGUAGE:
+{{#if language}}
+Write every belief's `name` and `description` in {{language}} — translate the SOURCE's meaning
+into {{language}} even if the SOURCE itself is written in a different language. Report
+"{{language}}" back as `language`.
+{{else}}
+Detect the primary language the SOURCE is written in, and write every belief's `name` and
+`description` in that same language. Report the language you used as `language` (its English
+name, e.g. "English", "Romanian").
+{{/if}}
+The `quote` field is the exception: it must always stay verbatim, character-for-character, in
+the SOURCE's own original language — never translate a quote, even when everything else is
+translated. A translated quote can no longer be matched back against the source text.
+
 For each belief, decide:
 
 - **nodeType**: one of `REQUIREMENT`, `ASSUMPTION`, `RISK`, `DECISION`. Most items are
@@ -21,7 +40,12 @@ For each belief, decide:
 - **kind**: a short sub-type — one of `feature`, `goal`, `rule`, `nfr`, `integration`, `data`,
   `platform`, `stakeholder`.
 - **name**: a short noun phrase (≤ 8 words).
-- **description**: one sentence of detail (or "").
+- **description**: a real spec entry, not a one-liner — cover whatever of the following actually
+  applies: what it does (functionality), what input data or fields it needs, a short description
+  of its UI (screen/section, what's on it) if it's user-facing, other technical details worth
+  recording, and — if the belief involves data — where that data comes from or how it's gathered.
+  For an integration or third-party API, also note any known limitation or requirement (rate
+  limits, auth model, sandbox access). Leave out whatever doesn't apply; never pad with filler.
 - **status**: how sure we are —
   `STATED` (the source explicitly says it),
   `INFERRED` (implied, or hedged language like "probably", "maybe", "we'd like"),
@@ -35,6 +59,9 @@ For each belief, decide:
 
 Rules:
 - Be conservative — do NOT invent features. Hedged language MUST be `INFERRED`, not `STATED`.
+- Treat business rules, workflow states, approvals, calculations, reporting needs, admin tools,
+  acceptance rules and commercial/change-control boundaries as extractable beliefs, not just
+  background context.
 - Add a few `ASSUMPTION` nodes (low confidence) only for defaults that are standard for this
   kind of project and that the source left open.
 - Quotes must be copied character-for-character from the SOURCE.
@@ -49,6 +76,7 @@ SOURCE ({{sourceKind}}):
 
 Respond with ONLY a JSON object — no prose, no code fences:
 {
+  "language": "English",
   "beliefs": [
     {
       "nodeType": "REQUIREMENT",

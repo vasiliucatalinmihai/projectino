@@ -33,6 +33,9 @@ PROJECT SUMMARY: {{summary}}
 NON-FUNCTIONAL:
 {{nonFunctional}}
 
+TECH STACK:
+{{techStack}}
+
 EPIC: {{epicTitle}}
 {{epicDescription}}
 

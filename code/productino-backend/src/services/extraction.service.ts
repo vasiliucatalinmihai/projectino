@@ -5,9 +5,10 @@ import { BeliefNode, Provenance, Source, User } from '../entities';
 import { BeliefNodeRepository, ProjectRepository, SourceRepository } from '../repository';
 import { ExtractBeliefsResult, ExtractBeliefsSchema, StructuredLlmService } from '../llm';
 import { ProjectService } from './project.service';
-import { PipelineResetService } from './pipeline-reset.service';
+import { PipelineOrchestratorService } from './pipeline-orchestrator.service';
 import { GraphValidationService } from './graph-validation.service';
 import { RubricService } from './rubric.service';
+import { projectTypeLabel } from '../common/project-type';
 
 /** "ASSUMED" belief can't claim more certainty than a default. */
 const UNGROUNDED_CONFIDENCE_CAP = 0.4;
@@ -22,7 +23,7 @@ export class ExtractionService {
     private readonly sourceRepository: SourceRepository,
     private readonly beliefNodeRepository: BeliefNodeRepository,
     private readonly llmService: StructuredLlmService,
-    private readonly resetService: PipelineResetService,
+    private readonly orchestrator: PipelineOrchestratorService,
     private readonly graphValidation: GraphValidationService,
     private readonly rubricService: RubricService,
   ) {}
@@ -32,11 +33,18 @@ export class ExtractionService {
     const project = await this.projectService.getProjectForUser(projectId, user); // enforces tenancy
     const source = await this.resolveSource(projectId, sourceId);
 
-    const { beliefs } = await this.llmService.run({
+    // Empty until the very first extraction — the call detects it in that case and
+    // reports it back; every later call passes it in, so the whole graph stays in
+    // one language regardless of what language a given round's input arrives in.
+    const knownLanguage = project.language ?? '';
+
+    const { beliefs, language } = await this.llmService.run({
       promptKey: PromptKey.EXTRACT_BELIEFS,
       vars: {
         source: source.content,
         sourceKind: source.kind,
+        projectType: projectTypeLabel(project),
+        language: knownLanguage,
         rubricList: this.rubricService.promptList(this.rubricService.forProject(project)),
       },
       schema: ExtractBeliefsSchema,
@@ -47,6 +55,10 @@ export class ExtractionService {
       // quotes trigger a repair asking the model to re-quote verbatim.
       validate: (value) => this.gradeGrounding(value, source),
     });
+
+    if (!project.language && language) {
+      await this.projectRepository.update(project.id, { language } as any);
+    }
 
     await this.beliefNodeRepository.deleteMany({ projectId, round: source.round });
 
@@ -69,11 +81,8 @@ export class ExtractionService {
       );
     }
 
-    if (project.stage === ProjectStage.BRIEFING) {
-      await this.projectRepository.update(project.id, { stage: ProjectStage.GAP_ANALYSIS } as any);
-    }
-
-    await this.resetService.afterExtraction(project.id);
+    const nextStage = project.stage === ProjectStage.BRIEFING ? ProjectStage.GAP_ANALYSIS : project.stage;
+    await this.orchestrator.advance(project.id, nextStage, 'extraction');
 
     return created;
   }

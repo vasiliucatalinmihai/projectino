@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ProjectStage, SourceKind } from '@prisma/client';
+import { Prisma, ProjectStage, ProjectType, SourceKind } from '@prisma/client';
 import {
   ClientRepository,
   ProjectRepository,
@@ -14,11 +14,17 @@ import { RubricArea, RubricService } from './rubric.service';
 export interface CreateProjectInput {
   name: string;
   clientId: number;
+  projectType?: ProjectType;
+  projectTypeOtherLabel?: string | null;
+  language?: string | null;
   briefing?: string | null;
 }
 export interface UpdateProjectInput {
   name?: string;
   clientId?: number;
+  projectType?: ProjectType;
+  projectTypeOtherLabel?: string | null;
+  language?: string | null;
   briefing?: string | null;
   stage?: ProjectStage;
 }
@@ -82,10 +88,17 @@ export class ProjectService {
 
   async create(input: CreateProjectInput, user: User): Promise<Project> {
     const client = await this.resolveClient(input.clientId, user);
+    const projectType = input.projectType ?? ProjectType.WEB;
     const project = await this.projectRepository.create({
       name: input.name,
       account: { connect: { id: client.accountId } },
       client: { connect: { id: client.id } },
+      projectType,
+      projectTypeOtherLabel: projectType === ProjectType.OTHER ? (input.projectTypeOtherLabel ?? null) : null,
+      language: input.language?.trim() || null,
+      // Seed the rubric with this type's default preset (universal areas + any type-specific
+      // ones); still fully editable afterward via the per-project rubric override UI.
+      rubric: this.rubricService.presetForType(projectType) as unknown as Prisma.InputJsonValue,
     } as any);
     // The initial briefing becomes the first Source of the Belief Graph.
     if (input.briefing) {
@@ -98,6 +111,10 @@ export class ProjectService {
     const project = await this.getProjectForUser(id, user); // enforces account ownership
     const { briefing, clientId, ...rest } = input;
     const data: any = { ...rest };
+
+    if (rest.projectType !== undefined && rest.projectType !== ProjectType.OTHER) {
+      data.projectTypeOtherLabel = null;
+    }
 
     if (clientId !== undefined && clientId !== project.clientId) {
       const client = await this.resolveClient(clientId, user);

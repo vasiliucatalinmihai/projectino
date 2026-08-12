@@ -16,6 +16,8 @@ Rules:
 - For each conflict, name the two beliefs (`beliefA`, `beliefB`, copied/short-paraphrased from
   the list), a short `summary` (≤ 10 words), and a `detail` explaining why they conflict and
   what to clarify.
+- Write `summary` and `detail` in {{language}}. `beliefA`/`beliefB` must still match the belief
+  list above (which is already in {{language}}), so no separate translation is needed for those.
 
 BELIEFS:
 {{beliefsList}}

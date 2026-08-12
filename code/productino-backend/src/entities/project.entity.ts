@@ -1,4 +1,4 @@
-import { Prisma, ProjectStage, SourceKind } from '@prisma/client';
+import { Prisma, ProjectStage, ProjectType, SourceKind } from '@prisma/client';
 import { Account } from './account.entity';
 import { BaseEntity } from './base.entity';
 import { Client } from './client.entity';
@@ -12,6 +12,9 @@ export class Project extends BaseEntity {
   client?: Client;
   name: string;
   stage: ProjectStage;
+  projectType: ProjectType;
+  projectTypeOtherLabel: string | null;
+  language: string | null;
   // Optional per-project rubric override ({ enabled, overrides }); null → the
   // built-in default. Interpreted by RubricService — kept loosely typed here so
   // the entity stays decoupled from the service.

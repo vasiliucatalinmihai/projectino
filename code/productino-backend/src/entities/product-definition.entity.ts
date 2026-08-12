@@ -8,6 +8,10 @@ export interface DefinitionContent {
   non_functional?: string[];
   assumptions?: string[];
   risks?: Array<{ description: string; severity?: string; mitigation?: string }>;
+  ui_spec?: {
+    screens?: Array<{ name: string; purpose?: string; keyElements?: string[]; primaryActions?: string[] }>;
+    userFlows?: Array<{ name: string; steps?: string[] }>;
+  };
   [key: string]: any;
 }
 

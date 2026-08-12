@@ -2,9 +2,11 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
+import { BullModule } from '@nestjs/bullmq';
 
 import { PrismaModule } from './prisma.module';
 import { LlmModule, StructuredLlmService } from './llm';
+import { PIPELINE_QUEUE } from './common/pipeline-job';
 
 // Controllers — add new ones here
 import { AuthController } from './http/controller/auth.controller';
@@ -17,11 +19,13 @@ import { ProjectController } from './http/controller/project.controller';
 import { ProjectGraphController } from './http/controller/project-graph.controller';
 import { QuestionController } from './http/controller/question.controller';
 import { DefinitionController } from './http/controller/definition.controller';
+import { TechDesignController } from './http/controller/tech-design.controller';
 import { DeliveryController } from './http/controller/delivery.controller';
 import { ProposalController } from './http/controller/proposal.controller';
 import { DashboardController } from './http/controller/dashboard.controller';
 import { SettingController } from './http/controller/setting.controller';
 import { PromptController } from './http/controller/prompt.controller';
+import { PipelineJobController } from './http/controller/pipeline-job.controller';
 
 // Services — add new ones here
 import {
@@ -40,16 +44,19 @@ import {
   AnswerService,
   ConflictService,
   DefinitionService,
+  TechDesignService,
   DeliveryService,
   ProposalService,
   PipelineResetService,
-  PipelineLockService,
+  PipelineOrchestratorService,
+  PipelineQueueService,
   GraphValidationService,
   DashboardService,
   SettingService,
   PromptManagerService,
   PromptService,
 } from './services';
+import { PipelineConsumer } from './consumers/pipeline.consumer';
 
 // Repositories — add new ones here
 import {
@@ -70,6 +77,7 @@ import {
   ProjectRoundRepository,
   ConflictRepository,
   ProductDefinitionRepository,
+  TechDesignRepository,
   DeliveryItemRepository,
   ProposalRepository,
 } from './repository';
@@ -89,6 +97,13 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
     }),
     PrismaModule,
     LlmModule,
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST || 'redis',
+        port: Number(process.env.REDIS_PORT) || 6379,
+      },
+    }),
+    BullModule.registerQueue({ name: PIPELINE_QUEUE }),
   ],
   controllers: [
     AuthController,
@@ -101,11 +116,13 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
     ProjectGraphController,
     QuestionController,
     DefinitionController,
+    TechDesignController,
     DeliveryController,
     ProposalController,
     DashboardController,
     SettingController,
     PromptController,
+    PipelineJobController,
   ],
   providers: [
     // repositories
@@ -126,6 +143,7 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
     ProjectRoundRepository,
     ConflictRepository,
     ProductDefinitionRepository,
+    TechDesignRepository,
     DeliveryItemRepository,
     ProposalRepository,
     // services
@@ -144,10 +162,13 @@ import { RequestLoggerMiddleware } from './http/middleware/request-logger.middle
     AnswerService,
     ConflictService,
     DefinitionService,
+    TechDesignService,
     DeliveryService,
     ProposalService,
     PipelineResetService,
-    PipelineLockService,
+    PipelineOrchestratorService,
+    PipelineQueueService,
+    PipelineConsumer,
     GraphValidationService,
     DashboardService,
     SettingService,

@@ -2,9 +2,13 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { setupBullBoard } from './bull-board.setup';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Mounted before setGlobalPrefix so it lives at /bull-board, not /api/bull-board.
+  setupBullBoard(app);
 
   app.setGlobalPrefix('api');
   app.useGlobalPipes(

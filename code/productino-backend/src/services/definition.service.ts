@@ -1,18 +1,19 @@
 import { BadRequestException, Injectable, UnprocessableEntityException } from '@nestjs/common';
-import { ProjectStage, QuestionStatus } from '@prisma/client';
+import { BeliefNodeType, PipelineRole, ProjectStage, QuestionStatus } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
+import { PIPELINE_ROLE_DESCRIPTION, PIPELINE_ROLE_LABEL } from '../common/pipeline-role';
+import { projectTypeLabel, requiresTechDesign, resolveLanguage } from '../common/project-type';
 import { BeliefNode, CoverageArea, ProductDefinition, Question, User } from '../entities';
 import {
   BeliefNodeRepository,
   CoverageAreaRepository,
   ProductDefinitionRepository,
-  ProjectRepository,
   ProjectRoundRepository,
   QuestionRepository,
 } from '../repository';
-import { StructuredLlmService, SynthesizePrdSchema } from '../llm';
+import { StructuredLlmService, SynthesizePrdSchema, synthesizePrdValidator } from '../llm';
 import { ProjectService } from './project.service';
-import { PipelineResetService } from './pipeline-reset.service';
+import { PipelineOrchestratorService } from './pipeline-orchestrator.service';
 
 /** Minimum weighted rollup (0–1) to generate a PRD without an explicit override. */
 export const DEFINITION_GATE = 0.7;
@@ -26,14 +27,13 @@ export interface GenerateDefinitionInput {
 export class DefinitionService {
   constructor(
     private readonly projectService: ProjectService,
-    private readonly projectRepo: ProjectRepository,
     private readonly beliefNodeRepository: BeliefNodeRepository,
     private readonly coverageAreaRepository: CoverageAreaRepository,
     private readonly questionRepository: QuestionRepository,
     private readonly projectRoundRepository: ProjectRoundRepository,
     private readonly productDefinitionRepository: ProductDefinitionRepository,
     private readonly structuredLlmService: StructuredLlmService,
-    private readonly resetService: PipelineResetService,
+    private readonly orchestrator: PipelineOrchestratorService,
   ) {}
 
   async latest(projectId: number, user: User): Promise<ProductDefinition | null> {
@@ -73,9 +73,15 @@ export class DefinitionService {
       this.questionRepository.findAllForProject(projectId),
     ]);
 
-    const content = await this.structuredLlmService.run({
+    const hasRiskBeliefs = nodes.some((node) => node.nodeType === BeliefNodeType.RISK && node.confidence >= 0.4);
+
+    const { output: content } = await this.structuredLlmService.runWithValidation({
       promptKey: PromptKey.SYNTHESIZE_PRD,
       vars: {
+        role: PIPELINE_ROLE_LABEL[PipelineRole.BUSINESS_ANALYST],
+        roleDescription: PIPELINE_ROLE_DESCRIPTION[PipelineRole.BUSINESS_ANALYST],
+        projectType: projectTypeLabel(project),
+        language: resolveLanguage(project),
         coverageList: this.coverageList(areas),
         beliefsList: this.beliefsList(nodes, areas),
         answeredList: this.answeredList(questions),
@@ -84,6 +90,10 @@ export class DefinitionService {
       accountId: user.accountId,
       subject: { type: 'project', id: project.id },
       scoreOf: () => rollupConfidence,
+      semanticValidate: synthesizePrdValidator({
+        hasRiskBeliefs,
+        requireUiSpec: requiresTechDesign(project.projectType),
+      }),
     });
 
     const version = (await this.productDefinitionRepository.countForProject(projectId)) + 1;
@@ -96,16 +106,12 @@ export class DefinitionService {
       overrideReason: belowGate && input.override ? (input.overrideReason ?? null) : null,
     } as any);
 
-    if (
+    const advancing =
       project.stage === ProjectStage.BRIEFING ||
       project.stage === ProjectStage.GAP_ANALYSIS ||
-      project.stage === ProjectStage.AWAITING_CLIENT
-    ) {
-      await this.projectRepo.update(project.id, { stage: ProjectStage.DEFINITION } as any);
-    }
-
-    // A new PRD makes any existing delivery plan and proposal dumb.
-    await this.resetService.afterDefinition(project.id);
+      project.stage === ProjectStage.AWAITING_CLIENT;
+    // A new PRD makes any existing tech design, delivery plan and proposal stale.
+    await this.orchestrator.advance(project.id, advancing ? ProjectStage.DEFINITION : project.stage, 'definition');
 
     return saved;
   }

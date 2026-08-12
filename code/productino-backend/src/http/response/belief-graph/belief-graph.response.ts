@@ -4,6 +4,7 @@ import {
   BeliefStatus,
   ConflictStatus,
   CoverageStatus,
+  PipelineRole,
   QuestionImpact,
   QuestionStatus,
   SourceKind,
@@ -87,6 +88,8 @@ export class CoverageAreaResponse {
   @ApiProperty({ example: 'compliance' }) key: string;
   @ApiProperty({ example: 'Compliance & Data Protection' }) name: string;
   @ApiProperty({ example: 'high' }) weight: string;
+  @ApiProperty({ enum: PipelineRole, description: 'Which persona owns this area during gap analysis' })
+  owner: PipelineRole;
   @ApiProperty({ example: 0.2, description: 'Rollup confidence, 0–1' }) rollupConfidence: number;
   @ApiProperty({ enum: CoverageStatus }) status: CoverageStatus;
   @ApiProperty({ example: 1 }) round: number;
@@ -101,6 +104,7 @@ export class CoverageAreaResponse {
       key: coverageArea.key,
       name: coverageArea.name,
       weight: coverageArea.weight,
+      owner: coverageArea.owner,
       rollupConfidence: coverageArea.rollupConfidence,
       status: coverageArea.status,
       round: coverageArea.round,
@@ -113,6 +117,8 @@ export class QuestionResponse {
   @ApiPropertyOptional({ nullable: true }) coverageKey: string | null;
   @ApiProperty() text: string;
   @ApiPropertyOptional({ nullable: true }) assumedAnswer: string | null;
+  @ApiProperty({ enum: PipelineRole, description: 'Which persona raised this question' })
+  askedBy: PipelineRole;
   @ApiProperty({ enum: QuestionImpact }) impact: QuestionImpact;
   @ApiProperty({ enum: QuestionStatus }) status: QuestionStatus;
   @ApiPropertyOptional({ nullable: true }) answerText: string | null;
@@ -128,6 +134,7 @@ export class QuestionResponse {
       coverageKey: question.coverageKey ?? null,
       text: question.text,
       assumedAnswer: question.assumedAnswer ?? null,
+      askedBy: question.askedBy,
       impact: question.impact,
       status: question.status,
       answerText: question.answerText ?? null,

@@ -22,6 +22,7 @@ export const JSON_SCHEMAS: Partial<Record<string, JsonSchemaSpec>> = {
     schema: {
       type: 'object',
       properties: {
+        language: { type: 'string', description: 'The language the output is written in, as its English name (e.g. "English", "Romanian")' },
         beliefs: {
           type: 'array',
           items: {
@@ -40,7 +41,7 @@ export const JSON_SCHEMAS: Partial<Record<string, JsonSchemaSpec>> = {
           },
         },
       },
-      required: ['beliefs'],
+      required: ['language', 'beliefs'],
     },
   },
 
@@ -125,6 +126,27 @@ export const JSON_SCHEMAS: Partial<Record<string, JsonSchemaSpec>> = {
               mitigation: string,
             },
             required: ['description'],
+          },
+        },
+        ui_spec: {
+          type: 'object',
+          properties: {
+            screens: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: { name: string, purpose: string, keyElements: stringArray, primaryActions: stringArray },
+                required: ['name'],
+              },
+            },
+            userFlows: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: { name: string, steps: stringArray },
+                required: ['name'],
+              },
+            },
           },
         },
       },
@@ -241,6 +263,37 @@ export const JSON_SCHEMAS: Partial<Record<string, JsonSchemaSpec>> = {
         },
       },
       required: ['intro'],
+    },
+  },
+
+  [PromptKey.CRITIC]: {
+    name: 'emit_critique',
+    description: 'Return whether the reviewed output passes the given criteria.',
+    schema: {
+      type: 'object',
+      properties: { pass: { type: 'boolean' }, critique: string },
+      required: ['pass'],
+    },
+  },
+
+  [PromptKey.DESIGN_ARCHITECTURE]: {
+    name: 'emit_tech_design',
+    description: 'Return the recommended technical architecture for the project.',
+    schema: {
+      type: 'object',
+      properties: {
+        frontend: { type: 'object', properties: { choice: string, rationale: string }, required: ['choice'] },
+        backend: { type: 'object', properties: { choice: string, rationale: string }, required: ['choice'] },
+        database: { type: 'object', properties: { choice: string, rationale: string }, required: ['choice'] },
+        apiStyle: { type: 'object', properties: { choice: string, rationale: string }, required: ['choice'] },
+        infra: { type: 'object', properties: { choice: string, rationale: string }, required: ['choice'] },
+        keyLibraries: {
+          type: 'array',
+          items: { type: 'object', properties: { name: string, purpose: string }, required: ['name'] },
+        },
+        risks: stringArray,
+      },
+      required: ['frontend', 'backend', 'database', 'apiStyle', 'infra'],
     },
   },
 };

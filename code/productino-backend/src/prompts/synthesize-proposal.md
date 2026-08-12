@@ -16,6 +16,8 @@ Write:
 
 Keep it client-appropriate: no internal jargon, no confidence scores, no hedging about gaps.
 
+LANGUAGE: Write all output in {{language}} — this goes straight to the client.
+
 PROJECT: {{projectName}} (client: {{clientName}})
 SUMMARY: {{summary}}
 

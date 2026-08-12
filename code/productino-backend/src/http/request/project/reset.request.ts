@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn } from 'class-validator';
 
-const RESET_FROM = ['graph', 'definition', 'delivery', 'proposal'] as const;
+const RESET_FROM = ['graph', 'definition', 'techDesign', 'delivery', 'proposal'] as const;
 
 export class ResetRequest {
   @ApiProperty({

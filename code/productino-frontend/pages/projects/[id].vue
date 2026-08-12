@@ -7,6 +7,9 @@ interface Project {
   clientName: string | null;
   briefing: string | null;
   stage: string;
+  projectType: string;
+  projectTypeOtherLabel: string | null;
+  language: string | null;
 }
 interface ClientOption {
   id: number;
@@ -28,9 +31,23 @@ const STAGES = [
   'GAP_ANALYSIS',
   'AWAITING_CLIENT',
   'DEFINITION',
+  'TECH_DESIGN',
   'PLANNING',
   'PROPOSAL',
 ];
+
+const PROJECT_TYPES: Array<{ value: string; label: string }> = [
+  { value: 'WEB', label: 'Web' },
+  { value: 'MOBILE', label: 'Mobile' },
+  { value: 'CONSULTING_ERP', label: 'ERP consulting' },
+  { value: 'CONSULTING_BUSINESS_PROCESS', label: 'Business process consulting' },
+  { value: 'IOT', label: 'IoT' },
+  { value: 'ERP_IMPLEMENTATION', label: 'ERP implementation' },
+  { value: 'FRONTEND_ONLY', label: 'Frontend-only app' },
+  { value: 'OTHER', label: 'Other' },
+];
+const CONSULTING_TYPES = new Set(['CONSULTING_ERP', 'CONSULTING_BUSINESS_PROCESS']);
+const needsTechDesign = (projectType: string | undefined) => !!projectType && !CONSULTING_TYPES.has(projectType);
 
 const { data: project, error, refresh } = await useAsyncData<Project | null>(
   `project-${projectId}`,
@@ -154,7 +171,7 @@ async function resetRubric() {
 
 // The four artifact sections are a single-select deck: only the chosen one
 // renders below the cards (null = none shown).
-type SectionKey = 'belief' | 'definition' | 'delivery' | 'proposal';
+type SectionKey = 'belief' | 'definition' | 'techdesign' | 'delivery' | 'proposal';
 const activeSection = ref<SectionKey | null>(null);
 function selectSection(key: SectionKey) {
   activeSection.value = activeSection.value === key ? null : key;
@@ -164,7 +181,15 @@ function selectSection(key: SectionKey) {
 const showForm = ref(false);
 const saving = ref(false);
 const formError = ref('');
-const form = reactive({ name: '', clientId: undefined as number | undefined, briefing: '', stage: '' });
+const form = reactive({
+  name: '',
+  clientId: undefined as number | undefined,
+  briefing: '',
+  stage: '',
+  projectType: 'WEB',
+  projectTypeOtherLabel: '',
+  language: '',
+});
 
 function openEdit() {
   if (!project.value) return;
@@ -173,6 +198,9 @@ function openEdit() {
     clientId: project.value.clientId,
     briefing: project.value.briefing ?? '',
     stage: project.value.stage,
+    projectType: project.value.projectType,
+    projectTypeOtherLabel: project.value.projectTypeOtherLabel ?? '',
+    language: project.value.language ?? '',
   });
   formError.value = '';
   showForm.value = true;
@@ -188,6 +216,9 @@ async function save() {
         clientId: form.clientId,
         briefing: form.briefing || null,
         stage: form.stage,
+        projectType: form.projectType,
+        projectTypeOtherLabel: form.projectType === 'OTHER' ? form.projectTypeOtherLabel || undefined : undefined,
+        language: form.language || undefined,
       },
     });
     showForm.value = false;
@@ -235,6 +266,7 @@ interface CoverageArea {
   key: string;
   name: string;
   weight: string;
+  owner: string; // BUSINESS_ANALYST | TECH_LEAD
   rollupConfidence: number; // 0–1
   status: string;
   round: number;
@@ -256,6 +288,7 @@ interface GraphQuestion {
   coverageKey: string | null;
   text: string;
   assumedAnswer: string | null;
+  askedBy: string; // BUSINESS_ANALYST | TECH_LEAD
   impact: string;
   status: string;
   answerText: string | null;
@@ -320,6 +353,26 @@ const NODETYPE_CLASS: Record<string, string> = {
   RISK: 'border-red-500/40 text-red-300',
   DECISION: 'border-sky-500/40 text-sky-300',
 };
+const ROLE_LABEL: Record<string, string> = { BUSINESS_ANALYST: 'Business Analyst', TECH_LEAD: 'Tech Lead' };
+const ROLE_CLASS: Record<string, string> = {
+  BUSINESS_ANALYST: 'border-violet-500/40 text-violet-300',
+  TECH_LEAD: 'border-sky-500/40 text-sky-300',
+};
+const WEIGHT_VALUE: Record<string, number> = { high: 3, medium: 2, low: 1 };
+
+// Same-role mini rollup as the backend's weighted gate, scoped to one persona's areas.
+function roleRollup(role: string): number {
+  const areas = (graph.value?.coverageAreas ?? []).filter((a) => a.owner === role);
+  if (!areas.length) return 0;
+  let sum = 0;
+  let total = 0;
+  for (const a of areas) {
+    const w = WEIGHT_VALUE[a.weight] ?? 1;
+    sum += a.rollupConfidence * w;
+    total += w;
+  }
+  return total ? sum / total : 0;
+}
 
 // Provenance entries that carry a quote (the "why we believe this" evidence).
 function provQuotes(n: BeliefNode): Provenance[] {
@@ -364,16 +417,64 @@ const canReset = computed(() => {
 // Re-running a step cascades a server-side reset of everything downstream, so
 // refetch the derived artifacts to keep the UI in sync.
 async function refreshDownstream() {
-  await Promise.all([refreshDef(), refreshDelivery(), refreshProposal()]);
+  await Promise.all([refreshDef(), refreshTechDesign(), refreshDelivery(), refreshProposal()]);
 }
+
+const STEP_LABEL: Record<string, string> = {
+  extract: 'Extracting beliefs',
+  score: 'Scoring coverage',
+  answers: 'Ingesting client answers',
+  notes: 'Adding extra info',
+  conflicts: 'Detecting conflicts',
+  definition: 'Generating the PRD',
+  'tech-design': 'Designing the architecture',
+  delivery: 'Planning delivery',
+  proposal: 'Generating the proposal',
+};
+// One shared indicator for "what pipeline job is running right now" — every trigger site
+// (button click this session, or a step resumed after a page refresh) writes into the SAME
+// ref via runPipelineJob/watchPipelineJob, so the top banner covers every job, not just answers.
+const activeJobStep = ref<string | null>(null);
+
+// A step triggered before a page refresh (or from another tab) keeps running server-side —
+// resume watching it so the UI doesn't just look idle while it's actually still in flight.
+onMounted(async () => {
+  const active = await getActivePipelineJob(projectId);
+  if (!active) return;
+  // Restore the specific button's busy state too, not just the top banner — a refreshed
+  // "Submit client answers" shouldn't look idle while it's still actually running.
+  const busyByStep = {
+    extract: extracting,
+    score: scoring,
+    answers: ingesting,
+    notes: addingNotes,
+    conflicts: detectingConflicts,
+    definition: generating,
+    'tech-design': designing,
+    delivery: planning,
+    proposal: proposing,
+  } as Record<string, typeof extracting>;
+  const busy = busyByStep[active.step];
+  if (busy) busy.value = true;
+  try {
+    await watchPipelineJob(projectId, active.jobId, active.step, activeJobStep);
+  } catch {
+    // No specific button triggered this, so there's no action-scoped error banner to
+    // populate — the refresh below just reflects whatever state the job left behind.
+  } finally {
+    if (busy) busy.value = false;
+    await Promise.all([refresh(), refreshDownstream()]);
+  }
+});
 
 const RESET_LABELS: Record<string, string> = {
   graph: 'the entire Belief Graph and everything built from it (PRD, plan, proposal)',
-  definition: 'the PRD, delivery plan and proposal',
+  definition: 'the PRD, tech design, delivery plan and proposal',
+  techDesign: 'the tech design, delivery plan and proposal',
   delivery: 'the delivery plan and proposal',
   proposal: 'the proposal',
 };
-async function resetPipeline(from: 'graph' | 'definition' | 'delivery' | 'proposal') {
+async function resetPipeline(from: 'graph' | 'definition' | 'techDesign' | 'delivery' | 'proposal') {
   const ok = await confirm({
     title: 'Reset this step?',
     message: `This permanently clears ${RESET_LABELS[from]}. Sources (briefing & client answers) are kept. Continue?`,
@@ -399,14 +500,11 @@ async function extract() {
   extracting.value = true;
   extractError.value = '';
   try {
-    // The endpoint returns the refreshed graph, so swap it in directly.
-    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/extract`, {
-      method: 'POST',
-      body: {},
-    });
+    await runPipelineJob(projectId, `/projects/${projectId}/extract`, {}, activeJobStep);
+    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/graph`);
     await Promise.all([refresh(), refreshDownstream()]); // stage advanced; downstream cleared
   } catch (e: any) {
-    extractError.value = e?.data?.message ?? 'Extraction failed';
+    extractError.value = e?.data?.message ?? e?.message ?? 'Extraction failed';
   } finally {
     extracting.value = false;
   }
@@ -417,13 +515,11 @@ async function score() {
   scoring.value = true;
   extractError.value = '';
   try {
-    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/score`, {
-      method: 'POST',
-      body: {},
-    });
+    await runPipelineJob(projectId, `/projects/${projectId}/score`, {}, activeJobStep);
+    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/graph`);
     await Promise.all([refresh(), refreshDownstream()]); // re-score clears the PRD chain
   } catch (e: any) {
-    extractError.value = e?.data?.message ?? 'Scoring failed';
+    extractError.value = e?.data?.message ?? e?.message ?? 'Scoring failed';
   } finally {
     scoring.value = false;
   }
@@ -440,12 +536,10 @@ async function detectConflicts() {
   detectingConflicts.value = true;
   extractError.value = '';
   try {
-    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/conflicts`, {
-      method: 'POST',
-      body: {},
-    });
+    await runPipelineJob(projectId, `/projects/${projectId}/conflicts`, {}, activeJobStep);
+    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/graph`);
   } catch (e: any) {
-    extractError.value = e?.data?.message ?? 'Conflict detection failed';
+    extractError.value = e?.data?.message ?? e?.message ?? 'Conflict detection failed';
   } finally {
     detectingConflicts.value = false;
   }
@@ -484,16 +578,41 @@ async function ingestAnswers() {
   ingesting.value = true;
   extractError.value = '';
   try {
-    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/answers`, {
-      method: 'POST',
-      body: { answers: answersText.value },
-    });
+    await runPipelineJob(projectId, `/projects/${projectId}/answers`, { answers: answersText.value }, activeJobStep);
+    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/graph`);
     answersText.value = '';
     await Promise.all([refresh(), refreshDownstream()]); // new answers clear downstream
   } catch (e: any) {
-    extractError.value = e?.data?.message ?? 'Ingesting answers failed';
+    extractError.value = e?.data?.message ?? e?.message ?? 'Ingesting answers failed';
   } finally {
     ingesting.value = false;
+  }
+}
+
+// --- extra info (call/meeting notes, outside the Q&A loop) ---
+const notesText = ref('');
+const notesKind = ref<'TRANSCRIPT' | 'EMAIL'>('TRANSCRIPT');
+const notesLabel = ref('');
+const addingNotes = ref(false);
+async function ingestNotes() {
+  if (!notesText.value.trim()) return;
+  addingNotes.value = true;
+  extractError.value = '';
+  try {
+    await runPipelineJob(
+      projectId,
+      `/projects/${projectId}/notes`,
+      { content: notesText.value, kind: notesKind.value, label: notesLabel.value || undefined },
+      activeJobStep,
+    );
+    graph.value = await useApi<BeliefGraph>(`/projects/${projectId}/graph`);
+    notesText.value = '';
+    notesLabel.value = '';
+    await Promise.all([refresh(), refreshDownstream()]); // new info clears downstream
+  } catch (e: any) {
+    extractError.value = e?.data?.message ?? e?.message ?? 'Adding extra info failed';
+  } finally {
+    addingNotes.value = false;
   }
 }
 
@@ -547,6 +666,32 @@ async function copyDoc() {
     setTimeout(() => (copied.value = false), 1500);
   }
 }
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function downloadPdf() {
+  const win = window.open('', '_blank');
+  if (!win) return;
+  win.document.write(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(docTitle.value)}</title>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #111; padding: 2.5rem; max-width: 46rem; margin: 0 auto; }
+  h1 { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 1.1rem; margin: 0 0 1.25rem; }
+  pre { white-space: pre-wrap; word-wrap: break-word; font-size: 12px; line-height: 1.6; margin: 0; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(docTitle.value)}</h1>
+<pre>${escapeHtml(docText.value)}</pre>
+</body>
+</html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 200);
+}
 
 // --- product definition (PRD) ---
 interface UserStory {
@@ -559,6 +704,16 @@ interface Risk {
   severity?: string;
   mitigation?: string;
 }
+interface UiScreen {
+  name: string;
+  purpose?: string;
+  keyElements?: string[];
+  primaryActions?: string[];
+}
+interface UiFlow {
+  name: string;
+  steps?: string[];
+}
 interface DefinitionContent {
   summary?: string;
   in_scope?: string[];
@@ -567,6 +722,7 @@ interface DefinitionContent {
   non_functional?: string[];
   assumptions?: string[];
   risks?: Risk[];
+  ui_spec?: { screens?: UiScreen[]; userFlows?: UiFlow[] };
 }
 interface ProductDefinition {
   id: number;
@@ -600,10 +756,12 @@ function asList(v: unknown): string[] {
 
 const generating = ref(false);
 async function postDefinition(override: boolean) {
-  await useApi(`/projects/${projectId}/definition`, {
-    method: 'POST',
-    body: override ? { override: true, overrideReason: 'Manual override from UI' } : {},
-  });
+  await runPipelineJob(
+    projectId,
+    `/projects/${projectId}/definition`,
+    override ? { override: true, overrideReason: 'Manual override from UI' } : {},
+    activeJobStep,
+  );
   // A new PRD clears the delivery plan + proposal downstream.
   await Promise.all([refreshDef(), refreshDelivery(), refreshProposal(), refresh()]);
 }
@@ -624,14 +782,56 @@ async function generateDefinition() {
         try {
           await postDefinition(true);
         } catch (e2: any) {
-          extractError.value = e2?.data?.message ?? 'Generation failed';
+          extractError.value = e2?.data?.message ?? e2?.message ?? 'Generation failed';
         }
       }
     } else {
-      extractError.value = data?.message ?? 'Generation failed';
+      extractError.value = data?.message ?? e?.message ?? 'Generation failed';
     }
   } finally {
     generating.value = false;
+  }
+}
+
+// --- tech design (Tech Lead architecture) ---
+interface StackChoice {
+  choice?: string;
+  rationale?: string;
+}
+interface TechDesignContent {
+  frontend?: StackChoice;
+  backend?: StackChoice;
+  database?: StackChoice;
+  apiStyle?: StackChoice;
+  infra?: StackChoice;
+  keyLibraries?: Array<{ name: string; purpose?: string }>;
+  risks?: string[];
+}
+interface TechDesign {
+  id: number;
+  version: number;
+  confidenceAtGeneration: number;
+  content: TechDesignContent;
+  createdAt: string;
+}
+
+const { data: techDesign, refresh: refreshTechDesign } = await useAsyncData<TechDesign | null>(
+  `project-${projectId}-techdesign`,
+  () => useApi<TechDesign>(`/projects/${projectId}/tech-design`).catch(() => null),
+);
+const designing = ref(false);
+async function generateTechDesign() {
+  designing.value = true;
+  extractError.value = '';
+  try {
+    await runPipelineJob(projectId, `/projects/${projectId}/tech-design`, {}, activeJobStep);
+    techDesign.value = await useApi<TechDesign>(`/projects/${projectId}/tech-design`);
+    // A new architecture clears the delivery plan + proposal downstream.
+    await Promise.all([refreshTechDesign(), refreshDelivery(), refreshProposal(), refresh()]);
+  } catch (e: any) {
+    extractError.value = e?.data?.message ?? e?.message ?? 'Architecture generation failed';
+  } finally {
+    designing.value = false;
   }
 }
 
@@ -663,14 +863,12 @@ async function generateDelivery() {
   planning.value = true;
   extractError.value = '';
   try {
-    delivery.value = await useApi<DeliveryTree>(`/projects/${projectId}/delivery`, {
-      method: 'POST',
-      body: {},
-    });
+    await runPipelineJob(projectId, `/projects/${projectId}/delivery`, {}, activeJobStep);
+    delivery.value = await useApi<DeliveryTree>(`/projects/${projectId}/delivery`);
     // A regenerated plan clears the proposal downstream.
     await Promise.all([refreshDelivery(), refreshProposal(), refresh()]);
   } catch (e: any) {
-    extractError.value = e?.data?.message ?? 'Planning failed';
+    extractError.value = e?.data?.message ?? e?.message ?? 'Planning failed';
   } finally {
     planning.value = false;
   }
@@ -730,10 +928,10 @@ async function generateProposal() {
   proposing.value = true;
   extractError.value = '';
   try {
-    await useApi(`/projects/${projectId}/proposal`, { method: 'POST', body: {} });
+    await runPipelineJob(projectId, `/projects/${projectId}/proposal`, {}, activeJobStep);
     await refreshProposal();
   } catch (e: any) {
-    extractError.value = e?.data?.message ?? 'Proposal generation failed';
+    extractError.value = e?.data?.message ?? e?.message ?? 'Proposal generation failed';
   } finally {
     proposing.value = false;
   }
@@ -767,8 +965,8 @@ function daysRange(lo: number, hi: number): string {
   return lo === hi ? `${lo}d` : `${lo}–${hi}d`;
 }
 
-// Refresh token usage whenever an LLM step changes the graph, PRD, plan or proposal.
-watch([graph, definition, delivery, proposal], () => {
+// Refresh token usage whenever an LLM step changes the graph, PRD, tech design, plan or proposal.
+watch([graph, definition, techDesign, delivery, proposal], () => {
   refreshUsage();
 });
 
@@ -777,20 +975,25 @@ const GATE = 0.7; // mirrors DEFINITION_GATE on the backend
 
 // The canonical stage machine (Project.stage), used as the page's spine. Several
 // early stages live in the Belief Graph section, so they share its anchor.
-const STAGE_RAIL = [
+const ALL_STAGE_RAIL = [
   { key: 'BRIEFING', label: 'Briefing', glyph: '✎', anchor: 'stage-belief' },
   { key: 'GAP_ANALYSIS', label: 'Gap analysis', glyph: '▤', anchor: 'stage-belief' },
   { key: 'AWAITING_CLIENT', label: 'Awaiting client', glyph: '↺', anchor: 'stage-belief' },
   { key: 'DEFINITION', label: 'Definition', glyph: '§', anchor: 'stage-definition' },
+  { key: 'TECH_DESIGN', label: 'Tech design', glyph: '⚙', anchor: 'stage-techdesign' },
   { key: 'PLANNING', label: 'Planning', glyph: '☷', anchor: 'stage-delivery' },
   { key: 'PROPOSAL', label: 'Proposal', glyph: '€', anchor: 'stage-proposal' },
 ];
+// Consulting engagements skip TECH_DESIGN entirely — there's nothing to architect.
+const STAGE_RAIL = computed(() =>
+  needsTechDesign(project.value?.projectType) ? ALL_STAGE_RAIL : ALL_STAGE_RAIL.filter((s) => s.key !== 'TECH_DESIGN'),
+);
 const stageIndex = computed(() =>
-  Math.max(0, STAGE_RAIL.findIndex((s) => s.key === (project.value?.stage ?? 'BRIEFING'))),
+  Math.max(0, STAGE_RAIL.value.findIndex((s) => s.key === (project.value?.stage ?? 'BRIEFING'))),
 );
 // Reaching the terminal stage (PROPOSAL) means the pipeline is complete, so that
 // node reads as done (✓) rather than "in progress".
-const isComplete = computed(() => stageIndex.value === STAGE_RAIL.length - 1);
+const isComplete = computed(() => stageIndex.value === STAGE_RAIL.value.length - 1);
 function railState(i: number): 'done' | 'current' | 'todo' {
   if (i < stageIndex.value) return 'done';
   if (i === stageIndex.value) return isComplete.value ? 'done' : 'current';
@@ -829,6 +1032,8 @@ const nextStep = computed<NextStep | null>(() => {
   }
   if (!definition.value)
     return { label: 'Generate the PRD', detail: `Confidence ${pct(rollup.value)}% clears the ${pct(GATE)}% gate — project the graph into a definition.`, kind: 'run', fn: generateDefinition, busy: () => generating.value };
+  if (needsTechDesign(project.value.projectType) && !techDesign.value)
+    return { label: 'Design the architecture', detail: 'Have the Tech Lead recommend frontend/backend/database/infra from the PRD.', kind: 'run', fn: generateTechDesign, busy: () => designing.value };
   if (!delivery.value?.epics?.length)
     return { label: 'Plan delivery', detail: 'Break the PRD into epics, stories and estimated tasks.', kind: 'run', fn: generateDelivery, busy: () => planning.value };
   if (!proposal.value)
@@ -840,6 +1045,7 @@ const nextStep = computed<NextStep | null>(() => {
 const ANCHOR_SECTION: Record<string, SectionKey> = {
   'stage-belief': 'belief',
   'stage-definition': 'definition',
+  'stage-techdesign': 'techdesign',
   'stage-delivery': 'delivery',
   'stage-proposal': 'proposal',
 };
@@ -877,12 +1083,28 @@ function goToStage(anchor: string) {
             </NuxtLink>
             <span v-if="project.clientName" class="text-neutral-700">·</span>
             <span class="font-mono text-xs uppercase tracking-wide text-neutral-500">{{ project.stage.replace('_', ' ') }}</span>
+            <template v-if="project.language">
+              <span class="text-neutral-700">·</span>
+              <span
+                class="rounded border border-neutral-700 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-neutral-400"
+                title="Output language for every LLM call"
+              >{{ project.language }}</span>
+            </template>
           </div>
         </div>
         <div v-if="canManage" class="flex shrink-0 gap-2">
           <button class="btn-ghost text-red-400" @click="remove">Delete</button>
           <button class="btn-primary" @click="openEdit">Edit</button>
         </div>
+      </div>
+
+      <!-- active job — whatever pipeline step is running right now for this project, however
+           it was triggered (a button click this session, or resumed after a page refresh) -->
+      <div
+        v-if="activeJobStep"
+        class="mt-4 flex items-center gap-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-4 text-sm text-neutral-200"
+      >
+        <span class="animate-pulse text-brand">●</span> {{ STEP_LABEL[activeJobStep] ?? activeJobStep }}…
       </div>
 
       <!-- pipeline rail — the convergence spine; click a stage to jump to it -->
@@ -953,6 +1175,15 @@ function goToStage(anchor: string) {
         class="mt-4 flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400"
       >
         <span class="text-brand">✓</span> Fully defined — PRD, plan and proposal are all generated.
+      </div>
+
+      <!-- pipeline error — global so it's visible no matter which stage section is open -->
+      <div
+        v-if="extractError"
+        class="mt-4 flex items-start justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/[0.06] p-4"
+      >
+        <p class="m-0 text-sm text-red-300">{{ extractError }}</p>
+        <button class="shrink-0 text-red-400 hover:text-red-200" title="Dismiss" @click="extractError = ''">✕</button>
       </div>
 
       <!-- discovery rubric -->
@@ -1045,7 +1276,7 @@ function goToStage(anchor: string) {
       </Collapsible>
 
       <!-- stage deck — pick an artifact to view and work on; only the active one opens below -->
-      <div class="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <!-- Belief Graph -->
         <div
           class="cursor-pointer rounded-xl border bg-neutral-900 p-4 transition-colors"
@@ -1134,6 +1365,41 @@ function goToStage(anchor: string) {
           </div>
         </div>
 
+        <!-- Tech Design (Tech Lead architecture) — not applicable to consulting engagements -->
+        <div
+          v-if="needsTechDesign(project.projectType)"
+          class="cursor-pointer rounded-xl border bg-neutral-900 p-4 transition-colors"
+          :class="activeSection === 'techdesign' ? 'border-brand ring-1 ring-brand/30' : 'border-neutral-800 hover:border-neutral-700'"
+          @click="selectSection('techdesign')"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="kicker">// tech design</div>
+              <h3 class="m-0 mt-0.5 text-base font-semibold text-white">Tech Design</h3>
+            </div>
+            <span class="shrink-0 transition-transform" :class="activeSection === 'techdesign' ? 'rotate-90 text-brand' : 'text-neutral-600'">▸</span>
+          </div>
+          <div class="mt-2 min-h-[1.75rem]">
+            <p v-if="techDesign" class="text-sm text-neutral-300">
+              <span class="font-mono font-bold text-brand">v{{ techDesign.version }}</span>
+              <span class="ml-1 text-neutral-500">{{ techDesign.content.backend?.choice }}</span>
+            </p>
+            <p v-else class="text-sm text-neutral-500">{{ definition ? 'Not designed' : 'Generate a PRD first' }}</p>
+          </div>
+          <div v-if="canRun || canReset" class="mt-3 flex flex-wrap gap-2" @click.stop>
+            <button
+              v-if="canRun"
+              class="btn-primary text-xs"
+              :disabled="designing || !definition"
+              :title="!definition ? 'Generate a PRD first' : ''"
+              @click="generateTechDesign"
+            >
+              {{ designing ? 'Designing…' : techDesign ? 'Regenerate' : 'Design architecture' }}
+            </button>
+            <button v-if="canReset && techDesign" class="btn-ghost text-xs text-red-400" @click="resetPipeline('techDesign')">Reset</button>
+          </div>
+        </div>
+
         <!-- Delivery Plan -->
         <div
           class="cursor-pointer rounded-xl border bg-neutral-900 p-4 transition-colors"
@@ -1211,7 +1477,6 @@ function goToStage(anchor: string) {
       <!-- Belief graph -->
       <div v-show="activeSection === 'belief'" id="stage-belief" class="mt-6 scroll-mt-4">
         <div class="flex flex-col gap-5">
-          <p v-if="extractError" class="text-sm text-red-400">{{ extractError }}</p>
 
         <!-- sources (evidence layer) — one collapsible per round of input -->
         <p
@@ -1239,6 +1504,22 @@ function goToStage(anchor: string) {
         </div>
 
         <template v-else>
+          <!-- BA / Tech Lead readiness — same weighted math as the overall gate, scoped per role -->
+          <div v-if="graph?.coverageAreas?.length" class="grid gap-3 sm:grid-cols-2">
+            <div class="rounded-xl border border-violet-500/20 bg-violet-500/[0.04] p-3">
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-[10px] uppercase tracking-wider text-violet-300">Business Analyst</span>
+                <span class="font-mono text-sm font-bold text-violet-300">{{ pct(roleRollup('BUSINESS_ANALYST')) }}%</span>
+              </div>
+            </div>
+            <div class="rounded-xl border border-sky-500/20 bg-sky-500/[0.04] p-3">
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-[10px] uppercase tracking-wider text-sky-300">Tech Lead</span>
+                <span class="font-mono text-sm font-bold text-sky-300">{{ pct(roleRollup('TECH_LEAD')) }}%</span>
+              </div>
+            </div>
+          </div>
+
           <!-- coverage areas -->
           <Collapsible title="// coverage" :open="false">
             <div class="flex flex-col gap-4">
@@ -1251,6 +1532,10 @@ function goToStage(anchor: string) {
                   <span class="w-10 shrink-0 text-right text-xs text-neutral-400">{{ pct(c.rollupConfidence) }}%</span>
                 </div>
                 <div class="mt-1 flex gap-2 font-mono text-[10px] uppercase tracking-wider text-neutral-500">
+                  <span
+                    class="rounded border px-1 py-px normal-case tracking-normal"
+                    :class="ROLE_CLASS[c.owner] ?? 'border-neutral-600 text-neutral-400'"
+                  >{{ ROLE_LABEL[c.owner] ?? c.owner }}</span>
                   <span>{{ c.status }}</span><span>· weight {{ c.weight }}</span>
                 </div>
               </div>
@@ -1362,6 +1647,12 @@ function goToStage(anchor: string) {
                   >
                     {{ q.impact }}
                   </span>
+                  <span
+                    class="rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase"
+                    :class="ROLE_CLASS[q.askedBy] ?? 'border-neutral-600 text-neutral-400'"
+                  >
+                    {{ ROLE_LABEL[q.askedBy] ?? q.askedBy }}
+                  </span>
                   <span v-if="q.coverageKey" class="font-mono text-[10px] uppercase tracking-wider text-neutral-500">{{ q.coverageKey }}</span>
                   <span class="font-mono text-[10px] uppercase tracking-wider text-neutral-600">{{ q.status }}</span>
                   <!-- curation: include / exclude (hidden once answered) -->
@@ -1413,6 +1704,37 @@ function goToStage(anchor: string) {
                 @click="ingestAnswers"
               >
                 {{ ingesting ? 'Ingesting…' : 'Submit client answers' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- extra info — a call/meeting with the client, outside the Q&A loop -->
+          <div v-if="canRun" class="rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+            <div class="mb-3 font-mono text-xs uppercase tracking-wider text-neutral-500">// extra info</div>
+            <p class="mb-2 text-xs text-neutral-500">
+              Had a call or meeting with the client? Paste notes here — it's extracted straight
+              into the graph as a new round and re-scored, without needing open questions first.
+            </p>
+            <textarea
+              v-model="notesText"
+              rows="4"
+              class="inp"
+              placeholder="Paste call/meeting notes, or a forwarded email…"
+            />
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <select v-model="notesKind" class="inp w-auto">
+                <option value="TRANSCRIPT">Call / meeting notes</option>
+                <option value="EMAIL">Email</option>
+              </select>
+              <input v-model="notesLabel" class="inp w-auto flex-1" placeholder="Label (optional) — e.g. Call with John, 03/15" maxlength="120" />
+            </div>
+            <div class="mt-2 flex justify-end">
+              <button
+                class="btn-primary"
+                :disabled="addingNotes || !notesText.trim()"
+                @click="ingestNotes"
+              >
+                {{ addingNotes ? 'Adding…' : 'Add extra info' }}
               </button>
             </div>
           </div>
@@ -1513,7 +1835,109 @@ function goToStage(anchor: string) {
               </div>
             </div>
           </Collapsible>
+
+          <Collapsible
+            v-if="definition.content.ui_spec?.screens?.length"
+            title="// UI / screens"
+            :open="false"
+            :count="definition.content.ui_spec.screens.length"
+          >
+            <div class="flex flex-col gap-4">
+              <div
+                v-for="(s, i) in definition.content.ui_spec.screens"
+                :key="i"
+                class="border-l-2 border-neutral-800 pl-3"
+              >
+                <p class="text-sm font-semibold text-neutral-200">{{ s.name }}</p>
+                <p v-if="s.purpose" class="mt-0.5 text-xs text-neutral-500">{{ s.purpose }}</p>
+                <ul v-if="asList(s.keyElements).length" class="mt-1 flex list-disc flex-col gap-0.5 pl-5 text-xs text-neutral-400">
+                  <li v-for="(el, j) in asList(s.keyElements)" :key="j">{{ el }}</li>
+                </ul>
+                <p v-if="asList(s.primaryActions).length" class="mt-1 text-xs text-neutral-500">
+                  <span class="text-neutral-400">Actions:</span> {{ asList(s.primaryActions).join(', ') }}
+                </p>
+              </div>
+            </div>
+          </Collapsible>
+
+          <Collapsible
+            v-if="definition.content.ui_spec?.userFlows?.length"
+            title="// user flows"
+            :open="false"
+            :count="definition.content.ui_spec.userFlows.length"
+          >
+            <div class="flex flex-col gap-3">
+              <div v-for="(f, i) in definition.content.ui_spec.userFlows" :key="i">
+                <p class="text-sm font-semibold text-neutral-200">{{ f.name }}</p>
+                <ol class="mt-1 flex list-decimal flex-col gap-0.5 pl-5 text-xs text-neutral-400">
+                  <li v-for="(step, j) in asList(f.steps)" :key="j">{{ step }}</li>
+                </ol>
+              </div>
+            </div>
+          </Collapsible>
         </div>
+        </div>
+      </div>
+
+      <!-- tech design (Tech Lead architecture) -->
+      <div v-show="activeSection === 'techdesign'" id="stage-techdesign" class="mt-6 scroll-mt-4">
+        <div class="flex flex-col gap-5">
+          <div
+            v-if="!techDesign"
+            class="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/50 p-5 text-sm text-neutral-500"
+          >
+            No architecture yet. Generate the PRD first, then have the Tech Lead recommend a stack here.
+          </div>
+
+          <div v-else class="flex flex-col gap-5">
+            <div class="rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+              <div class="flex flex-wrap items-center gap-3">
+                <span class="font-mono text-xs uppercase tracking-wider text-neutral-500">v{{ techDesign.version }}</span>
+                <span class="text-xs text-neutral-500">based on a {{ pct(techDesign.confidenceAtGeneration) }}% confidence definition</span>
+              </div>
+            </div>
+
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div
+                v-for="field in [
+                  ['Frontend', techDesign.content.frontend],
+                  ['Backend', techDesign.content.backend],
+                  ['Database', techDesign.content.database],
+                  ['API style', techDesign.content.apiStyle],
+                  ['Infra', techDesign.content.infra],
+                ] as [string, StackChoice | undefined][]"
+                :key="field[0]"
+                class="rounded-xl border border-neutral-800 bg-neutral-900 p-4"
+              >
+                <div class="font-mono text-[10px] uppercase tracking-wider text-neutral-500">{{ field[0] }}</div>
+                <p class="mt-1 text-sm font-semibold text-neutral-100">{{ field[1]?.choice || '—' }}</p>
+                <p v-if="field[1]?.rationale" class="mt-1 text-xs leading-snug text-neutral-500">{{ field[1]?.rationale }}</p>
+              </div>
+            </div>
+
+            <Collapsible
+              v-if="techDesign.content.keyLibraries?.length"
+              title="// key libraries"
+              :count="techDesign.content.keyLibraries.length"
+            >
+              <ul class="flex list-disc flex-col gap-1 pl-5 text-sm text-neutral-300">
+                <li v-for="(lib, i) in techDesign.content.keyLibraries" :key="i">
+                  <span class="font-mono text-neutral-200">{{ lib.name }}</span>
+                  <span v-if="lib.purpose" class="text-neutral-500"> — {{ lib.purpose }}</span>
+                </li>
+              </ul>
+            </Collapsible>
+
+            <Collapsible
+              v-if="techDesign.content.risks?.length"
+              title="// technical risks"
+              :count="techDesign.content.risks.length"
+            >
+              <ul class="flex list-disc flex-col gap-1 pl-5 text-sm text-neutral-400">
+                <li v-for="(r, i) in techDesign.content.risks" :key="i">{{ r }}</li>
+              </ul>
+            </Collapsible>
+          </div>
         </div>
       </div>
 
@@ -1649,6 +2073,20 @@ function goToStage(anchor: string) {
             <option v-for="s in STAGES" :key="s" :value="s">{{ s }}</option>
           </select>
         </label>
+        <label class="field">
+          Project type
+          <select v-model="form.projectType" class="inp">
+            <option v-for="t in PROJECT_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+          </select>
+        </label>
+        <label v-if="form.projectType === 'OTHER'" class="field">
+          Project type (describe)
+          <input v-model="form.projectTypeOtherLabel" class="inp" maxlength="120" />
+        </label>
+        <label class="field">
+          Output language
+          <input v-model="form.language" class="inp" maxlength="60" placeholder="Auto-detected from the briefing" />
+        </label>
         <label class="field">Briefing<textarea v-model="form.briefing" rows="14" class="inp font-mono text-sm" /></label>
         <p v-if="formError" class="m-0 text-sm text-red-400">{{ formError }}</p>
         <div class="mt-1 flex justify-end gap-2">
@@ -1660,14 +2098,15 @@ function goToStage(anchor: string) {
       </form>
     </Modal>
 
-    <Modal v-if="showDoc" :title="docTitle" @close="showDoc = false">
+    <Modal v-if="showDoc" :title="docTitle" size="5xl" @close="showDoc = false">
       <div class="flex flex-col gap-3">
         <p class="m-0 text-xs text-neutral-500">
           Client-facing — internal scores are hidden. Copy this into your email or doc.
         </p>
-        <pre class="max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-lg border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-200">{{ docText }}</pre>
+        <pre class="max-h-[65vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-left font-mono text-sm leading-relaxed text-neutral-200">{{ docText }}</pre>
         <div class="flex justify-end gap-2">
           <button class="btn-ghost" @click="showDoc = false">Close</button>
+          <button class="btn-ghost" @click="downloadPdf">Download PDF</button>
           <button class="btn-primary" @click="copyDoc">{{ copied ? 'Copied!' : 'Copy' }}</button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { CoverageStatus } from '@prisma/client';
+import { CoverageStatus, PipelineRole } from '@prisma/client';
 import { BaseEntity } from './base.entity';
 
 /**
@@ -12,6 +12,7 @@ export class CoverageArea extends BaseEntity {
   key: string;
   name: string;
   weight: string; // high | medium | low
+  owner: PipelineRole;
   rollupConfidence: number;
   status: CoverageStatus;
   round: number;

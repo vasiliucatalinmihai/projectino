@@ -14,11 +14,20 @@ Rules:
 - Tag each task's **phase**: "MVP", "Phase 2", or "Later".
 - Stay within this epic. Account for the non-functional requirements where relevant.
 - Keep tasks concrete and distinct — each should be a unit of work a developer could pick up.
+- Write tasks against the actual tech stack below — e.g. "Add Order model + migration (Prisma)"
+  and "Build OrderList screen (Vue)", not generic prose that could apply to any stack.
+- Write `title`/`description` in {{language}}; keep stack/library/tool names as-is, untranslated.
 
 PROJECT SUMMARY: {{summary}}
 
 NON-FUNCTIONAL:
 {{nonFunctional}}
+
+UI / SCREENS:
+{{uiSpec}}
+
+TECH STACK:
+{{techStack}}
 
 EPIC: {{epicTitle}}
 {{epicDescription}}

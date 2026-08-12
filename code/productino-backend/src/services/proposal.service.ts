@@ -2,14 +2,11 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ProjectStage } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
 import { Proposal, ProposalContent, ProposalPhase, User } from '../entities';
-import {
-  ProductDefinitionRepository,
-  ProjectRepository,
-  ProposalRepository,
-  SettingRepository,
-} from '../repository';
+import { ProductDefinitionRepository, ProposalRepository, SettingRepository } from '../repository';
 import { StructuredLlmService, SynthesizeProposalSchema } from '../llm';
+import { resolveLanguage } from '../common/project-type';
 import { ProjectService } from './project.service';
+import { PipelineOrchestratorService } from './pipeline-orchestrator.service';
 import { DeliveryService, DeliveryNode } from './delivery.service';
 
 const PHASE_ORDER: Record<string, number> = { MVP: 0, 'PHASE 2': 1, LATER: 2 };
@@ -23,7 +20,7 @@ export class ProposalService {
     private readonly proposalRepository: ProposalRepository,
     private readonly settingRepository: SettingRepository,
     private readonly llmService: StructuredLlmService,
-    private readonly projectRepository: ProjectRepository,
+    private readonly orchestrator: PipelineOrchestratorService,
   ) {}
 
   async latest(projectId: number, user: User): Promise<Proposal | null> {
@@ -91,7 +88,7 @@ export class ProposalService {
       totalHighCost,
     } as any);
 
-    await this.projectRepository.update(projectId, { stage: ProjectStage.PROPOSAL } as any);
+    await this.orchestrator.advance(projectId, ProjectStage.PROPOSAL);
     return proposal;
   }
 
@@ -165,7 +162,7 @@ export class ProposalService {
   }
 
   private async writeProposal(
-    project: { name: string; client?: { name?: string } },
+    project: { name: string; client?: { name?: string }; language?: string | null },
     summary: string,
     phases: ProposalPhase[],
   ): Promise<{ intro?: string; closing?: string; phases?: Array<{ name?: string; narrative?: string }> }> {
@@ -180,6 +177,7 @@ export class ProposalService {
           clientName: project.client?.name ?? 'the client',
           summary,
           phasesList,
+          language: resolveLanguage(project),
         },
         schema: SynthesizeProposalSchema,
         accountId: (project as any).accountId,

@@ -1,18 +1,24 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { CoverageStatus, ProjectStage, QuestionStatus } from '@prisma/client';
+import { CoverageStatus, PipelineRole, ProjectStage, QuestionStatus } from '@prisma/client';
 import { PromptKey } from '../common/prompt-key';
-import { BeliefNode, ProjectRound, User } from '../entities';
+import { PIPELINE_ROLE_DESCRIPTION, PIPELINE_ROLE_LABEL } from '../common/pipeline-role';
+import { projectTypeLabel, resolveLanguage } from '../common/project-type';
+import { BeliefNode, Project, ProjectRound, User } from '../entities';
 import {
   BeliefNodeRepository,
   CoverageAreaRepository,
-  ProjectRepository,
   ProjectRoundRepository,
   QuestionRepository,
 } from '../repository';
-import { ScoreCoverageResult, ScoreCoverageSchema, StructuredLlmService } from '../llm';
+import { ScoreCoverageResult, ScoreCoverageSchema, scoreCoverageValidator, StructuredLlmService } from '../llm';
 import { ProjectService } from './project.service';
-import { PipelineResetService } from './pipeline-reset.service';
+import { PipelineOrchestratorService } from './pipeline-orchestrator.service';
 import { RubricArea, RubricService } from './rubric.service';
+
+const ROLES: PipelineRole[] = [PipelineRole.BUSINESS_ANALYST, PipelineRole.TECH_LEAD];
+
+type ScoredArea = ScoreCoverageResult['areas'][number] & { owner: PipelineRole };
+type AskedQuestion = ScoreCoverageResult['questions'][number] & { askedBy: PipelineRole };
 
 @Injectable()
 export class CoverageService {
@@ -22,9 +28,8 @@ export class CoverageService {
     private readonly coverageAreaRepository: CoverageAreaRepository,
     private readonly questionRepository: QuestionRepository,
     private readonly projectRoundRepository: ProjectRoundRepository,
-    private readonly projectRepository: ProjectRepository,
     private readonly structuredLlmService: StructuredLlmService,
-    private readonly pipelineResetService: PipelineResetService,
+    private readonly orchestrator: PipelineOrchestratorService,
     private readonly rubricService: RubricService,
   ) {}
 
@@ -36,25 +41,27 @@ export class CoverageService {
     }
 
     const rubric = this.rubricService.forProject(project);
+    const beliefsListText = this.beliefsList(nodes, rubric);
 
-    const result = await this.structuredLlmService.run({
-      promptKey: PromptKey.SCORE_COVERAGE,
-      vars: { rubricList: this.rubricService.promptList(rubric), beliefsList: this.beliefsList(nodes, rubric) },
-      schema: ScoreCoverageSchema,
-      accountId: user.accountId,
-      subject: { type: 'project', id: project.id },
-      scoreOf: (value) => this.weightedRollup(value, rubric),
-    });
+    // Business Analyst and Tech Lead each score and question only the rubric areas
+    // they own — two focused calls instead of one generalist pass. Both see the
+    // full belief list for context; only the rubric scope is filtered per role.
+    const perRole = await Promise.all(
+      ROLES.map((role) => this.scoreForRole(project, user, role, rubric, beliefsListText)),
+    );
+    const areas: ScoredArea[] = perRole.flatMap((r) => r.areas);
+    const questions: AskedQuestion[] = perRole.flatMap((r) => r.questions);
+    const result: ScoreCoverageResult = { areas, questions };
 
     const nextIndex = (await this.projectRoundRepository.findAllForProject(projectId)).length + 1;
-    const areaByKey = new Map(
-      result.areas.map((area) => [area.key.toLowerCase().trim(), area]),
-    );
+    const areaByKey = new Map(areas.map((area) => [area.key.toLowerCase().trim(), area]));
 
     // Upsert every rubric category (in order), deriving status from confidence.
     for (const area of rubric) {
-      const confidence = areaByKey.get(area.key)?.rollupConfidence ?? 0;
+      const scored = areaByKey.get(area.key);
+      const confidence = scored?.rollupConfidence ?? 0;
       const status = this.statusFor(confidence);
+      const owner = scored?.owner ?? area.owner;
       await this.coverageAreaRepository.upsert(
         { projectId_key: { projectId, key: area.key } },
         {
@@ -62,11 +69,12 @@ export class CoverageService {
           key: area.key,
           name: area.name,
           weight: area.weight,
+          owner,
           rollupConfidence: confidence,
           status,
           round: nextIndex,
         } as any,
-        { name: area.name, weight: area.weight, rollupConfidence: confidence, status, round: nextIndex } as any,
+        { name: area.name, weight: area.weight, owner, rollupConfidence: confidence, status, round: nextIndex } as any,
       );
     }
     // Drop coverage rows for areas no longer in the (possibly customized) rubric.
@@ -76,12 +84,13 @@ export class CoverageService {
 
     // Regenerate the question set, preserving anything already answered by a client.
     await this.questionRepository.deleteMany({ projectId, status: { not: QuestionStatus.ANSWERED } });
-    for (const question of result.questions) {
+    for (const question of questions) {
       await this.questionRepository.create({
         project: { connect: { id: projectId } },
         coverageKey: question.coverageKey,
         text: question.text,
         assumedAnswer: question.assumedAnswer || null,
+        askedBy: question.askedBy,
         impact: question.impact,
         status: QuestionStatus.OPEN,
         round: nextIndex,
@@ -94,16 +103,54 @@ export class CoverageService {
       rollupConfidence: rollup,
     } as any);
 
-    // New coverage makes the PRD and everything built from it stale.
-    await this.pipelineResetService.afterScoring(projectId);
-
     // Reflect the convergence loop in the stage: open questions → awaiting the
-    // client's reply; none → back in gap analysis, ready to define. (Re-scoring
-    // cleared the PRD chain above, so regressing the stage here is correct.)
-    const nextStage = result.questions.length > 0 ? ProjectStage.AWAITING_CLIENT : ProjectStage.GAP_ANALYSIS;
-    await this.projectRepository.update(projectId, { stage: nextStage } as any);
+    // client's reply; none → back in gap analysis, ready to define. New coverage
+    // makes the PRD and everything built from it stale, so this also cascades.
+    const nextStage = questions.length > 0 ? ProjectStage.AWAITING_CLIENT : ProjectStage.GAP_ANALYSIS;
+    await this.orchestrator.advance(projectId, nextStage, 'scoring');
 
     return round;
+  }
+
+  /** One role's focused pass over the rubric areas it owns. */
+  private async scoreForRole(
+    project: Project,
+    user: User,
+    role: PipelineRole,
+    rubric: RubricArea[],
+    beliefsListText: string,
+  ): Promise<{ areas: ScoredArea[]; questions: AskedQuestion[] }> {
+    const ownedAreas = rubric.filter((area) => area.owner === role);
+    if (!ownedAreas.length) return { areas: [], questions: [] };
+    const ownedKeys = ownedAreas.map((area) => area.key);
+    const ownedSet = new Set(ownedKeys);
+
+    const { output } = await this.structuredLlmService.runWithValidation({
+      promptKey: PromptKey.SCORE_COVERAGE,
+      vars: {
+        role: PIPELINE_ROLE_LABEL[role],
+        roleDescription: PIPELINE_ROLE_DESCRIPTION[role],
+        projectType: projectTypeLabel(project),
+        language: resolveLanguage(project),
+        rubricList: this.rubricService.promptList(ownedAreas),
+        beliefsList: beliefsListText,
+      },
+      schema: ScoreCoverageSchema,
+      accountId: user.accountId,
+      subject: { type: 'project', id: project.id },
+      scoreOf: (value) => this.weightedRollup(value, ownedAreas),
+      semanticValidate: scoreCoverageValidator(ownedKeys),
+    });
+
+    // Discard any stray categories the model scored outside what it actually owns.
+    return {
+      areas: output.areas
+        .filter((area) => ownedSet.has(area.key.toLowerCase().trim()))
+        .map((area) => ({ ...area, owner: role })),
+      questions: output.questions
+        .filter((q) => ownedSet.has((q.coverageKey ?? '').toLowerCase().trim()))
+        .map((q) => ({ ...q, askedBy: role })),
+    };
   }
 
   /** Weighted average of per-area confidence — the "defined enough?" gate value. */

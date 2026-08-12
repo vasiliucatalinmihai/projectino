@@ -8,6 +8,8 @@ export enum PromptKey {
   GENERATE_EPIC_PLAN = 'generate-epic-plan',
   ESTIMATE_EPIC = 'estimate-epic',
   SYNTHESIZE_PROPOSAL = 'synthesize-proposal',
+  DESIGN_ARCHITECTURE = 'design-architecture',
+  CRITIC = 'critic',
 }
 
 export interface PromptConfig {
@@ -35,6 +37,7 @@ export interface PromptRunOutcome {
   provider?: string;
   model?: string;
   score?: number;
+  validationRounds?: number;
   meta?: Record<string, any>;
 }
 
